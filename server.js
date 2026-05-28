@@ -16,7 +16,6 @@ if (!firebaseServiceAccountB64) {
 
 let serviceAccount;
 try {
-  // Decodificar Base64 y parsear JSON directamente
   const decoded = Buffer.from(firebaseServiceAccountB64, 'base64').toString('utf-8');
   serviceAccount = JSON.parse(decoded);
   console.log('✅ Firebase Admin SDK inicializado');
@@ -35,6 +34,48 @@ const auth = admin.auth();
 
 app.get('/health', (req, res) => {
   res.json({ status: 'sync_completed', timestamp: new Date().toISOString() });
+});
+
+app.post('/sync', async (req, res) => {
+  try {
+    console.log('🔄 Sincronizando eventos...');
+    
+    const oddsApiKey1 = process.env.ODDS_API_KEY_1;
+    const sports = ['soccer_epl', 'soccer_champions_league', 'baseball_mlb'];
+    let eventosSync = {};
+
+    for (const sport of sports) {
+      try {
+        const response = await axios.get('https://api.the-odds-api.com/v4/sports/' + sport + '/events', {
+          params: { apiKey: oddsApiKey1 }
+        });
+
+        if (response.data && Array.isArray(response.data)) {
+          response.data.forEach(evento => {
+            eventosSync[evento.id] = {
+              nombre: evento.home_team + ' vs ' + evento.away_team,
+              deporte: sport,
+              fecha: evento.commence_time,
+              actualizado: new Date().toISOString()
+            };
+          });
+        }
+      } catch (e) {
+        console.error('Error en ' + sport + ':', e.message);
+      }
+    }
+
+    if (Object.keys(eventosSync).length > 0) {
+      await db.ref('eventos_sync').set(eventosSync);
+      console.log('✅ ' + Object.keys(eventosSync).length + ' eventos sincronizados');
+    }
+    
+    res.json({ status: 'sync_completed', eventos: Object.keys(eventosSync).length });
+
+  } catch (e) {
+    console.error('❌ Error sync:', e.message);
+    res.status(500).json({ error: e.message });
+  }
 });
 
 app.post('/api/delete-user', async (req, res) => {
