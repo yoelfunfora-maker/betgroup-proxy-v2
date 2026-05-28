@@ -20,7 +20,9 @@ if (!firebaseServiceAccountB64) {
 let serviceAccount;
 try {
   const decoded = Buffer.from(firebaseServiceAccountB64, 'base64').toString('utf-8');
-  serviceAccount = JSON.parse(decoded);
+  // Reemplazar \n literales por saltos de línea reales
+  const fixedJson = decoded.replace(/\\n/g, '\n');
+  serviceAccount = JSON.parse(fixedJson);
   console.log('✅ Firebase Admin SDK inicializado desde Base64');
 } catch (e) {
   console.error('❌ Error decodificando Base64:', e);
