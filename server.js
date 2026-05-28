@@ -2,7 +2,6 @@ const express = require('express');
 const admin = require('firebase-admin');
 const cors = require('cors');
 const axios = require('axios');
-const base64 = require('base-64');
 
 const app = express();
 
@@ -20,7 +19,7 @@ if (!firebaseServiceAccountB64) {
 
 let serviceAccount;
 try {
-  const decoded = base64.decode(firebaseServiceAccountB64);
+  const decoded = Buffer.from(firebaseServiceAccountB64, 'base64').toString('utf-8');
   serviceAccount = JSON.parse(decoded);
   console.log('✅ Firebase Admin SDK inicializado desde Base64');
 } catch (e) {
