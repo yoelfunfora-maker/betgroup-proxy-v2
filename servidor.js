@@ -53,7 +53,7 @@ function parseEvents(espnData, sport) {
   if (!espnData || !espnData.events) return events;
 
   const ahora = Date.now();
-  const dentro7dias = ahora + (7 * 24 * 60 * 60 * 1000);
+  const dentro7dias = ahora + (14 * 24 * 60 * 60 * 1000);
 
   for (const ev of espnData.events) {
     try {
