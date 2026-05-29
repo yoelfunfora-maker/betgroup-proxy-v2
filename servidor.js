@@ -287,3 +287,12 @@ syncApiFootballToFirebase();
 
 // Sync cada 6 horas
 setInterval(syncApiFootballToFirebase, 6 * 60 * 60 * 1000);
+
+// ENDPOINT EMERGENCIA: Sync manual de API-Football
+const { syncApiFootballEmergency } = require('./apifootball-sync.js');
+
+app.post('/api/emergency-sync', async (req, res) => {
+  console.log('🚨 EMERGENCIA: Sincronizando API-Football...');
+  const result = await syncApiFootballEmergency();
+  res.json({ status: 'emergency_sync', result });
+});
