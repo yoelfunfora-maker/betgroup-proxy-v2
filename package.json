@@ -4,7 +4,7 @@
   "description": "BetGroup Proxy - Sync de cuotas desde The Odds API a Firebase RTDB",
   "main": "server.js",
   "scripts": {
-    "start": "node server.js",
+    "start": "node servidor.js",
     "dev": "nodemon server.js"
   },
   "dependencies": {
