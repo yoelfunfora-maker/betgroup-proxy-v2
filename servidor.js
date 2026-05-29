@@ -1,6 +1,7 @@
 const express = require('express');
 const cors = require('cors');
 const https = require('https');
+const axios = require('axios');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -47,13 +48,13 @@ function fetchESPN(path) {
   });
 }
 
-// PARSE - Filtra eventos de próximos 7 días
+// PARSE
 function parseEvents(espnData, sport) {
   const events = [];
   if (!espnData || !espnData.events) return events;
 
   const ahora = Date.now();
-  const dentro7dias = ahora + (14 * 24 * 60 * 60 * 1000);
+  const dentro14dias = ahora + (14 * 24 * 60 * 60 * 1000);
 
   for (const ev of espnData.events) {
     try {
@@ -61,45 +62,33 @@ function parseEvents(espnData, sport) {
       if (!competition) continue;
       const competitors = competition.competitors || [];
       
-      // Para MMA/Boxing: atletas individuales, no equipos
-      if (sport === 'mma' || sport === 'boxing') {
+      if (sport === 'mma') {
         if (competitors.length < 2) continue;
-        
         const home = competitors[0];
         const away = competitors[1];
-        
         const status = ev.status?.type;
         const isLive = status?.state === 'in';
         const isScheduled = status?.state === 'pre';
         if (!isLive && !isScheduled) continue;
 
         const eventTime = new Date(ev.date || 0).getTime();
-        if (eventTime < ahora || eventTime > dentro7dias) continue;
-
-        const homeScore = home.score || '0';
-        const awayScore = away.score || '0';
-        const minute = ev.status?.displayClock || '';
+        if (eventTime < ahora || eventTime > dentro14dias) continue;
 
         events.push({
           id: ev.id,
           sport,
-          liga: espnData.leagues?.[0]?.name || sport,
+          liga: espnData.leagues?.[0]?.name || 'UFC',
           ligaLogo: espnData.leagues?.[0]?.logos?.[0]?.href || null,
           local: home.athlete?.displayName || 'Peleador 1',
           visitante: away.athlete?.displayName || 'Peleador 2',
           homeLogo: null,
           awayLogo: null,
-          marcador: isLive ? `${homeScore}-${awayScore}` : null,
-          minuto: isLive ? minute : null,
-          periodo: ev.status?.period || 0,
+          marcador: isLive ? `${home.score || 0}-${away.score || 0}` : null,
+          minuto: isLive ? ev.status?.displayClock || '' : null,
           estado: isLive ? 'live' : 'scheduled',
-          horaInicio: ev.date || null,
-          cuota_local: null,
-          cuota_empate: null,
-          cuota_visitante: null
+          horaInicio: ev.date || null
         });
       } else {
-        // Para soccer/basketball/baseball: equipos
         const home = competitors.find(c => c.homeAway === 'home');
         const away = competitors.find(c => c.homeAway === 'away');
         if (!home || !away) continue;
@@ -110,11 +99,7 @@ function parseEvents(espnData, sport) {
         if (!isLive && !isScheduled) continue;
 
         const eventTime = new Date(ev.date || 0).getTime();
-        if (eventTime < ahora || eventTime > dentro7dias) continue;
-
-        const homeScore = home.score || '0';
-        const awayScore = away.score || '0';
-        const minute = ev.status?.displayClock || '';
+        if (eventTime < ahora || eventTime > dentro14dias) continue;
 
         events.push({
           id: ev.id,
@@ -125,14 +110,10 @@ function parseEvents(espnData, sport) {
           visitante: away.team?.displayName || 'Visitante',
           homeLogo: home.team?.logo || null,
           awayLogo: away.team?.logo || null,
-          marcador: isLive ? `${homeScore}-${awayScore}` : null,
-          minuto: isLive ? minute : null,
-          periodo: ev.status?.period || 0,
+          marcador: isLive ? `${home.score || 0}-${away.score || 0}` : null,
+          minuto: isLive ? ev.status?.displayClock || '' : null,
           estado: isLive ? 'live' : 'scheduled',
-          horaInicio: ev.date || null,
-          cuota_local: null,
-          cuota_empate: null,
-          cuota_visitante: null
+          horaInicio: ev.date || null
         });
       }
     } catch(e) { }
@@ -140,9 +121,99 @@ function parseEvents(espnData, sport) {
   return events;
 }
 
+// SYNC THE ODDS API A FIREBASE
+async function syncOddsToFirebase() {
+  try {
+    console.log('🔄 Sincronizando The Odds API a Firebase...');
+    
+    const admin = require('firebase-admin');
+    const fs = require('fs');
+    
+    // Firebase
+    const serviceAccountBase64 = process.env.FIREBASE_SERVICE_ACCOUNT_B64;
+    if (!serviceAccountBase64) {
+      console.error('❌ FIREBASE_SERVICE_ACCOUNT_B64 no definida');
+      return;
+    }
+    
+    const serviceAccount = JSON.parse(Buffer.from(serviceAccountBase64, 'base64').toString('utf8'));
+    
+    if (!admin.apps.length) {
+      admin.initializeApp({
+        credential: admin.credential.cert(serviceAccount),
+        databaseURL: 'https://betgroup-cuba-2024-default-rtdb.firebaseio.com'
+      });
+    }
+    
+    const db = admin.database();
+    const apiKey = process.env.ODDS_API_KEY_1 || '2c550803a9a95dd28f551e2aba532676';
+    
+    const sports = [
+      { odds: 'soccer_epl', name: 'Premier League' },
+      { odds: 'soccer_la_liga', name: 'La Liga' },
+      { odds: 'soccer_champions_league', name: 'Champions' },
+      { odds: 'basketball_nba', name: 'NBA' },
+      { odds: 'baseball_mlb', name: 'MLB' }
+    ];
+    
+    let count = 0;
+    
+    for (const sport of sports) {
+      try {
+        const response = await axios.get(`https://api.the-odds-api.com/v4/sports/${sport.odds}/odds`, {
+          params: { apiKey, regions: 'us', markets: '1x2' },
+          timeout: 10000
+        });
+        
+        if (response.data && Array.isArray(response.data)) {
+          for (const evento of response.data) {
+            const bookmaker = evento.bookmakers?.[0];
+            if (!bookmaker) continue;
+            
+            const market = bookmaker.markets?.find(m => m.key === '1x2' || m.key === 'h2h');
+            if (!market) continue;
+            
+            const outcomes = market.outcomes || [];
+            const local = outcomes.find(o => o.name === evento.home_team);
+            const visitante = outcomes.find(o => o.name === evento.away_team);
+            const empate = outcomes.find(o => o.name === 'Draw');
+            
+            if (!local || !visitante) continue;
+            
+            const mercado = {
+              id: evento.id,
+              sport: sport.odds.split('_')[0],
+              homeTeam: evento.home_team,
+              awayTeam: evento.away_team,
+              commenceTime: evento.commence_time,
+              cuotas: {
+                local: local.price,
+                visitante: visitante.price,
+                empate: empate ? empate.price : null
+              },
+              expiraEn: new Date(evento.commence_time).getTime() + 7200000,
+              ligaOdds: sport.name
+            };
+            
+            await db.ref(`mercados/${evento.id}`).set(mercado);
+            count++;
+          }
+        }
+      } catch(e) {
+        console.error(`Error en ${sport.odds}:`, e.message);
+      }
+    }
+    
+    console.log(`✅ ${count} mercados sincronizados a Firebase`);
+    
+  } catch(e) {
+    console.error('Error sincronización:', e.message);
+  }
+}
+
 // ENDPOINTS
 app.get('/', (req, res) => {
-  res.json({ status: 'online', message: 'BetGroup Pro API — ESPN Cartelera (próximos 7 días)' });
+  res.json({ status: 'online', message: 'BetGroup Pro API' });
 });
 
 app.get('/api/health', (req, res) => {
@@ -199,5 +270,11 @@ app.get('/api/fixtures', async (req, res) => {
 });
 
 app.listen(PORT, () => {
-  console.log(`✅ BetGroup Cartelera ESPN (próximos 7 días) en puerto ${PORT}`);
+  console.log(`✅ BetGroup API en puerto ${PORT}`);
+  
+  // Sync inmediatamente al iniciar
+  syncOddsToFirebase();
+  
+  // Sync cada 6 horas
+  setInterval(syncOddsToFirebase, 6 * 60 * 60 * 1000);
 });
