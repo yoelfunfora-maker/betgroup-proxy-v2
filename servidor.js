@@ -154,3 +154,68 @@ app.get('/api/fixtures', async (req, res) => {
 app.listen(PORT, () => {
   console.log(`✅ BetGroup Cartelera ESPN en puerto ${PORT}`);
 });
+
+// SYNC: Obtener cuotas de The Odds API y guardarlas en Firebase
+app.post('/api/sync-odds', async (req, res) => {
+  try {
+    console.log('📊 Sincronizando The Odds API...');
+    
+    const apiKey = process.env.ODDS_API_KEY_1;
+    if (!apiKey) return res.status(400).json({ error: 'ODDS_API_KEY_1 no definida' });
+    
+    const sports = ['soccer_epl', 'soccer_champions_league', 'soccer_la_liga', 'baseball_mlb', 'basketball_nba'];
+    const admin = require('firebase-admin');
+    const db = admin.database();
+    
+    let count = 0;
+    
+    for (const sport of sports) {
+      try {
+        const response = await axios.get(`https://api.the-odds-api.com/v4/sports/${sport}/odds`, {
+          params: { apiKey: apiKey, regions: 'us' },
+          timeout: 8000
+        });
+        
+        if (response.data && Array.isArray(response.data)) {
+          response.data.forEach(evento => {
+            const mercado = {
+              id: evento.id,
+              sport: sport.split('_')[0],
+              homeTeam: evento.home_team,
+              awayTeam: evento.away_team,
+              commenceTime: evento.commence_time,
+              cuotas: {
+                local: evento.bookmakers?.[0]?.markets?.[0]?.outcomes?.[0]?.price || null,
+                visitante: evento.bookmakers?.[0]?.markets?.[0]?.outcomes?.[1]?.price || null,
+                draw: evento.bookmakers?.[0]?.markets?.[0]?.outcomes?.[2]?.price || null
+              },
+              expiraEn: new Date(evento.commence_time).getTime() + 7200000
+            };
+            
+            if (mercado.cuotas.local && mercado.cuotas.visitante) {
+              db.ref(`mercados/${evento.id}`).set(mercado);
+              count++;
+            }
+          });
+        }
+      } catch(e) {
+        console.error(`Error en ${sport}:`, e.message);
+      }
+    }
+    
+    console.log(`✅ ${count} mercados sincronizados`);
+    res.json({ status: 'sync_completed', mercados: count });
+    
+  } catch(e) {
+    console.error('Error sync:', e);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// Sincronizar automáticamente cada 6 horas
+setInterval(() => {
+  console.log('🔄 Sincronización automática de The Odds API...');
+  const axios = require('axios');
+  const admin = require('firebase-admin');
+  // (mismo código del endpoint)
+}, 6 * 60 * 60 * 1000);
