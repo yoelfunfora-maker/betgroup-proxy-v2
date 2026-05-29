@@ -278,3 +278,12 @@ app.listen(PORT, () => {
   // Sync cada 6 horas
   setInterval(syncOddsToFirebase, 6 * 60 * 60 * 1000);
 });
+
+// API-Football Sync
+const { syncApiFootballToFirebase } = require('./apifootball-sync.js');
+
+// Sync al iniciar
+syncApiFootballToFirebase();
+
+// Sync cada 6 horas
+setInterval(syncApiFootballToFirebase, 6 * 60 * 60 * 1000);
