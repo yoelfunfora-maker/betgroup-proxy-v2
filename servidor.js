@@ -47,48 +47,94 @@ function fetchESPN(path) {
   });
 }
 
-// PARSE - SIN CALCULAR CUOTAS (dejar para The Odds API)
+// PARSE - Filtra eventos de próximos 7 días
 function parseEvents(espnData, sport) {
   const events = [];
   if (!espnData || !espnData.events) return events;
+
+  const ahora = Date.now();
+  const dentro7dias = ahora + (7 * 24 * 60 * 60 * 1000);
 
   for (const ev of espnData.events) {
     try {
       const competition = ev.competitions?.[0];
       if (!competition) continue;
       const competitors = competition.competitors || [];
-      const home = competitors.find(c => c.homeAway === 'home');
-      const away = competitors.find(c => c.homeAway === 'away');
-      if (!home || !away) continue;
+      
+      // Para MMA/Boxing: atletas individuales, no equipos
+      if (sport === 'mma' || sport === 'boxing') {
+        if (competitors.length < 2) continue;
+        
+        const home = competitors[0];
+        const away = competitors[1];
+        
+        const status = ev.status?.type;
+        const isLive = status?.state === 'in';
+        const isScheduled = status?.state === 'pre';
+        if (!isLive && !isScheduled) continue;
 
-      const status = ev.status?.type;
-      const isLive = status?.state === 'in';
-      const isScheduled = status?.state === 'pre';
-      if (!isLive && !isScheduled) continue;
+        const eventTime = new Date(ev.date || 0).getTime();
+        if (eventTime < ahora || eventTime > dentro7dias) continue;
 
-      const homeScore = home.score || '0';
-      const awayScore = away.score || '0';
-      const minute = ev.status?.displayClock || '';
-      const period = ev.status?.period || 0;
+        const homeScore = home.score || '0';
+        const awayScore = away.score || '0';
+        const minute = ev.status?.displayClock || '';
 
-      events.push({
-        id: ev.id,
-        sport,
-        liga: espnData.leagues?.[0]?.name || sport,
-        ligaLogo: espnData.leagues?.[0]?.logos?.[0]?.href || null,
-        local: home.team?.displayName || 'Local',
-        visitante: away.team?.displayName || 'Visitante',
-        homeLogo: home.team?.logo || null,
-        awayLogo: away.team?.logo || null,
-        marcador: isLive ? `${homeScore}-${awayScore}` : null,
-        minuto: isLive ? minute : null,
-        periodo: period,
-        estado: isLive ? 'live' : 'scheduled',
-        horaInicio: ev.date || null,
-        cuota_local: null,
-        cuota_empate: null,
-        cuota_visitante: null
-      });
+        events.push({
+          id: ev.id,
+          sport,
+          liga: espnData.leagues?.[0]?.name || sport,
+          ligaLogo: espnData.leagues?.[0]?.logos?.[0]?.href || null,
+          local: home.athlete?.displayName || 'Peleador 1',
+          visitante: away.athlete?.displayName || 'Peleador 2',
+          homeLogo: null,
+          awayLogo: null,
+          marcador: isLive ? `${homeScore}-${awayScore}` : null,
+          minuto: isLive ? minute : null,
+          periodo: ev.status?.period || 0,
+          estado: isLive ? 'live' : 'scheduled',
+          horaInicio: ev.date || null,
+          cuota_local: null,
+          cuota_empate: null,
+          cuota_visitante: null
+        });
+      } else {
+        // Para soccer/basketball/baseball: equipos
+        const home = competitors.find(c => c.homeAway === 'home');
+        const away = competitors.find(c => c.homeAway === 'away');
+        if (!home || !away) continue;
+
+        const status = ev.status?.type;
+        const isLive = status?.state === 'in';
+        const isScheduled = status?.state === 'pre';
+        if (!isLive && !isScheduled) continue;
+
+        const eventTime = new Date(ev.date || 0).getTime();
+        if (eventTime < ahora || eventTime > dentro7dias) continue;
+
+        const homeScore = home.score || '0';
+        const awayScore = away.score || '0';
+        const minute = ev.status?.displayClock || '';
+
+        events.push({
+          id: ev.id,
+          sport,
+          liga: espnData.leagues?.[0]?.name || sport,
+          ligaLogo: espnData.leagues?.[0]?.logos?.[0]?.href || null,
+          local: home.team?.displayName || 'Local',
+          visitante: away.team?.displayName || 'Visitante',
+          homeLogo: home.team?.logo || null,
+          awayLogo: away.team?.logo || null,
+          marcador: isLive ? `${homeScore}-${awayScore}` : null,
+          minuto: isLive ? minute : null,
+          periodo: ev.status?.period || 0,
+          estado: isLive ? 'live' : 'scheduled',
+          horaInicio: ev.date || null,
+          cuota_local: null,
+          cuota_empate: null,
+          cuota_visitante: null
+        });
+      }
     } catch(e) { }
   }
   return events;
@@ -96,7 +142,7 @@ function parseEvents(espnData, sport) {
 
 // ENDPOINTS
 app.get('/', (req, res) => {
-  res.json({ status: 'online', message: 'BetGroup Pro API — ESPN Cartelera' });
+  res.json({ status: 'online', message: 'BetGroup Pro API — ESPN Cartelera (próximos 7 días)' });
 });
 
 app.get('/api/health', (req, res) => {
@@ -117,7 +163,8 @@ app.get('/api/fixtures', async (req, res) => {
     { path: 'soccer/conmebol.libertadores/scoreboard', sport: 'soccer' },
     { path: 'soccer/usa.1/scoreboard', sport: 'soccer' },
     { path: 'basketball/nba/scoreboard', sport: 'basketball' },
-    { path: 'baseball/mlb/scoreboard', sport: 'baseball' }
+    { path: 'baseball/mlb/scoreboard', sport: 'baseball' },
+    { path: 'mma/ufc/scoreboard', sport: 'mma' }
   ];
 
   const todos = [];
@@ -152,70 +199,5 @@ app.get('/api/fixtures', async (req, res) => {
 });
 
 app.listen(PORT, () => {
-  console.log(`✅ BetGroup Cartelera ESPN en puerto ${PORT}`);
+  console.log(`✅ BetGroup Cartelera ESPN (próximos 7 días) en puerto ${PORT}`);
 });
-
-// SYNC: Obtener cuotas de The Odds API y guardarlas en Firebase
-app.post('/api/sync-odds', async (req, res) => {
-  try {
-    console.log('📊 Sincronizando The Odds API...');
-    
-    const apiKey = process.env.ODDS_API_KEY_1;
-    if (!apiKey) return res.status(400).json({ error: 'ODDS_API_KEY_1 no definida' });
-    
-    const sports = ['soccer_epl', 'soccer_champions_league', 'soccer_la_liga', 'baseball_mlb', 'basketball_nba'];
-    const admin = require('firebase-admin');
-    const db = admin.database();
-    
-    let count = 0;
-    
-    for (const sport of sports) {
-      try {
-        const response = await axios.get(`https://api.the-odds-api.com/v4/sports/${sport}/odds`, {
-          params: { apiKey: apiKey, regions: 'us' },
-          timeout: 8000
-        });
-        
-        if (response.data && Array.isArray(response.data)) {
-          response.data.forEach(evento => {
-            const mercado = {
-              id: evento.id,
-              sport: sport.split('_')[0],
-              homeTeam: evento.home_team,
-              awayTeam: evento.away_team,
-              commenceTime: evento.commence_time,
-              cuotas: {
-                local: evento.bookmakers?.[0]?.markets?.[0]?.outcomes?.[0]?.price || null,
-                visitante: evento.bookmakers?.[0]?.markets?.[0]?.outcomes?.[1]?.price || null,
-                draw: evento.bookmakers?.[0]?.markets?.[0]?.outcomes?.[2]?.price || null
-              },
-              expiraEn: new Date(evento.commence_time).getTime() + 7200000
-            };
-            
-            if (mercado.cuotas.local && mercado.cuotas.visitante) {
-              db.ref(`mercados/${evento.id}`).set(mercado);
-              count++;
-            }
-          });
-        }
-      } catch(e) {
-        console.error(`Error en ${sport}:`, e.message);
-      }
-    }
-    
-    console.log(`✅ ${count} mercados sincronizados`);
-    res.json({ status: 'sync_completed', mercados: count });
-    
-  } catch(e) {
-    console.error('Error sync:', e);
-    res.status(500).json({ error: e.message });
-  }
-});
-
-// Sincronizar automáticamente cada 6 horas
-setInterval(() => {
-  console.log('🔄 Sincronización automática de The Odds API...');
-  const axios = require('axios');
-  const admin = require('firebase-admin');
-  // (mismo código del endpoint)
-}, 6 * 60 * 60 * 1000);
