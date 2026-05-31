@@ -23,7 +23,9 @@ function fetchESPN(path) {
   });
 }
 
-export default async (req, res) => {
+module.exports = async (req, res) => {
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  
   try {
     const deportes = [
       { path: 'soccer/esp.1/scoreboard', sport: 'soccer' },
@@ -38,8 +40,6 @@ export default async (req, res) => {
     ];
 
     let allEvents = [];
-    const ahora = Date.now();
-    const dentro14dias = ahora + (14 * 24 * 60 * 60 * 1000);
 
     for (const deporte of deportes) {
       try {
@@ -47,27 +47,26 @@ export default async (req, res) => {
         if (!data.events) continue;
 
         for (const ev of data.events) {
-          const competition = ev.competitions?.[0];
-          if (!competition) continue;
+          const comp = ev.competitions?.[0];
+          if (!comp) continue;
           
-          const competitors = competition.competitors || [];
-          const eventTime = new Date(ev.date || 0).getTime();
+          const competitors = comp.competitors || [];
+          const eventTime = new Date(ev.date).getTime();
+          const ahora = Date.now();
+          const dentro14 = ahora + (14 * 24 * 60 * 60 * 1000);
           
-          if (eventTime < ahora || eventTime > dentro14dias) continue;
+          if (eventTime < ahora || eventTime > dentro14) continue;
 
-          const status = ev.status?.type;
-          const isLive = status?.state === 'in';
-          const isScheduled = status?.state === 'pre';
-          
-          if (!isLive && !isScheduled) continue;
+          const status = ev.status?.type?.state;
+          if (status !== 'in' && status !== 'pre') continue;
 
           if (deporte.sport === 'mma') {
             if (competitors.length < 2) continue;
             allEvents.push({
               id: ev.id,
               sport: 'mma',
-              local: competitors[0].athlete?.displayName || 'Fighter 1',
-              visitante: competitors[1].athlete?.displayName || 'Fighter 2',
+              local: competitors[0].athlete?.displayName || 'F1',
+              visitante: competitors[1].athlete?.displayName || 'F2',
               liga: data.leagues?.[0]?.name || 'UFC',
               horaInicio: ev.date
             });
@@ -79,15 +78,15 @@ export default async (req, res) => {
             allEvents.push({
               id: ev.id,
               sport: deporte.sport,
-              local: home.team?.displayName || 'Local',
-              visitante: away.team?.displayName || 'Away',
+              local: home.team?.displayName || 'L',
+              visitante: away.team?.displayName || 'A',
               liga: data.leagues?.[0]?.name || deporte.sport,
               horaInicio: ev.date
             });
           }
         }
       } catch(e) {
-        console.error(`Error ${deporte.path}:`, e.message);
+        console.error(`Error: ${e.message}`);
       }
     }
 
