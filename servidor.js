@@ -1,7 +1,6 @@
 const express = require('express');
 const cors = require('cors');
 const https = require('https');
-const axios = require('axios');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -9,7 +8,6 @@ const PORT = process.env.PORT || 3000;
 app.use(cors());
 app.use(express.json());
 
-// Cache simple
 const cache = {};
 const CACHE_TTL = 3 * 60 * 1000;
 
@@ -36,11 +34,8 @@ function fetchESPN(path) {
       let data = '';
       res.on('data', chunk => data += chunk);
       res.on('end', () => {
-        try {
-          resolve(JSON.parse(data));
-        } catch(e) {
-          reject(new Error('ESPN parse error'));
-        }
+        try { resolve(JSON.parse(data)); }
+        catch(e) { reject(new Error('ESPN parse error')); }
       });
     });
     
@@ -58,15 +53,25 @@ app.get('/api/fixtures', async (req, res) => {
     }
 
     const deportes = [
-      { path: 'soccer/esp.1/scoreboard', sport: 'soccer' },
-      { path: 'soccer/eng.1/scoreboard', sport: 'soccer' },
-      { path: 'soccer/ger.1/scoreboard', sport: 'soccer' },
-      { path: 'soccer/ita.1/scoreboard', sport: 'soccer' },
-      { path: 'soccer/fra.1/scoreboard', sport: 'soccer' },
-      { path: 'soccer/uefa.champions/scoreboard', sport: 'soccer' },
-      { path: 'basketball/nba/scoreboard', sport: 'basketball' },
-      { path: 'baseball/mlb/scoreboard', sport: 'baseball' },
-      { path: 'mma/ufc/scoreboard', sport: 'mma' }
+      // SOCCER - Todas las competiciones
+      { path: 'soccer/esp.1/scoreboard', sport: 'soccer', liga: 'LaLiga' },
+      { path: 'soccer/eng.1/scoreboard', sport: 'soccer', liga: 'Premier League' },
+      { path: 'soccer/ger.1/scoreboard', sport: 'soccer', liga: 'Bundesliga' },
+      { path: 'soccer/ita.1/scoreboard', sport: 'soccer', liga: 'Serie A' },
+      { path: 'soccer/fra.1/scoreboard', sport: 'soccer', liga: 'Ligue 1' },
+      { path: 'soccer/uefa.champions/scoreboard', sport: 'soccer', liga: 'Champions League' },
+      { path: 'soccer/conmebol.libertadores/scoreboard', sport: 'soccer', liga: 'CONMEBOL Libertadores' },
+      { path: 'soccer/fifa.world_cup/scoreboard', sport: 'soccer', liga: 'Mundial FIFA' },
+      { path: 'soccer/usa.1/scoreboard', sport: 'soccer', liga: 'MLS' },
+      // BASKETBALL
+      { path: 'basketball/nba/scoreboard', sport: 'basketball', liga: 'NBA' },
+      // BASEBALL
+      { path: 'baseball/mlb/scoreboard', sport: 'baseball', liga: 'MLB' },
+      // MMA
+      { path: 'mma/ufc/scoreboard', sport: 'mma', liga: 'UFC' },
+      // TENIS
+      { path: 'tennis/atp/scoreboard', sport: 'tennis', liga: 'ATP' },
+      { path: 'tennis/wta/scoreboard', sport: 'tennis', liga: 'WTA' }
     ];
 
     let allEvents = [];
@@ -100,7 +105,7 @@ app.get('/api/fixtures', async (req, res) => {
               sport: 'mma',
               local: competitors[0].athlete?.displayName || 'Fighter 1',
               visitante: competitors[1].athlete?.displayName || 'Fighter 2',
-              liga: data.leagues?.[0]?.name || 'UFC',
+              liga: deporte.liga,
               estado: isLive ? 'live' : 'scheduled',
               horaInicio: ev.date
             });
@@ -114,14 +119,14 @@ app.get('/api/fixtures', async (req, res) => {
               sport: deporte.sport,
               local: home.team?.displayName || 'Local',
               visitante: away.team?.displayName || 'Away',
-              liga: data.leagues?.[0]?.name || deporte.sport,
+              liga: deporte.liga,
               estado: isLive ? 'live' : 'scheduled',
               horaInicio: ev.date
             });
           }
         }
       } catch(e) {
-        console.error(`Error fetching ${deporte.path}:`, e.message);
+        console.error(`Error ${deporte.path}:`, e.message);
       }
     }
 
@@ -140,9 +145,72 @@ app.get('/api/fixtures', async (req, res) => {
 });
 
 app.get('/health', (req, res) => {
-  res.json({ status: 'ok' });
+  res.json({ status: 'ok', timestamp: Date.now() });
 });
 
 app.listen(PORT, () => {
-  console.log(`🚀 Proxy escuchando en puerto ${PORT}`);
+  console.log(`🚀 Proxy ESPN escuchando en puerto ${PORT}`);
+});
+
+// ENDPOINT CRÍTICO: Procesar apuestas
+app.post('/api/apostar', async (req, res) => {
+  const { uid, amount, evento, tipo, cuota } = req.body;
+  
+  if (!uid || !amount || !evento || !tipo || !cuota) {
+    return res.status(400).json({ error: 'Parámetros faltantes' });
+  }
+
+  try {
+    const admin = require('firebase-admin');
+    const serviceAccountBase64 = process.env.FIREBASE_SERVICE_ACCOUNT_B64;
+    
+    if (!serviceAccountBase64) {
+      return res.status(500).json({ error: 'Firebase no configurado' });
+    }
+
+    const serviceAccount = JSON.parse(Buffer.from(serviceAccountBase64, 'base64').toString('utf8'));
+    
+    if (!admin.apps.length) {
+      admin.initializeApp({
+        credential: admin.credential.cert(serviceAccount),
+        databaseURL: 'https://betgroup-cuba-2024-default-rtdb.firebaseio.com'
+      });
+    }
+
+    const db = admin.database();
+
+    // PASO 1: Descontar saldo
+    const res1 = await db.ref(`users/${uid}/creditoReal`).transaction(c => {
+      if (c === null || amount > c) return;
+      return c - amount;
+    });
+
+    if (!res1.committed) {
+      return res.status(400).json({ error: 'Saldo insuficiente' });
+    }
+
+    const saldoNuevo = res1.snapshot.val();
+
+    // PASO 2: Registrar apuesta
+    const betId = Date.now().toString();
+    await db.ref(`apuestas/${uid}/${betId}`).set({
+      eventoNombre: evento,
+      tipo: tipo,
+      monto: amount,
+      cuota: cuota,
+      ganancia: Math.floor(amount * cuota),
+      estado: 'pendiente',
+      fecha: Date.now()
+    });
+
+    res.json({ 
+      success: true, 
+      saldoNuevo: saldoNuevo,
+      betId: betId
+    });
+
+  } catch (err) {
+    console.error('Error /api/apostar:', err);
+    res.status(500).json({ error: err.message });
+  }
 });
