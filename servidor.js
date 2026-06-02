@@ -179,17 +179,16 @@ app.post('/api/apostar', async (req, res) => {
 
     const db = admin.database();
 
-    // PASO 1: Descontar saldo
-    const res1 = await db.ref(`users/${uid}/creditoReal`).transaction(c => {
-      if (c === null || amount > c) return;
-      return c - amount;
-    });
-
-    if (!res1.committed) {
-      return res.status(400).json({ error: 'Saldo insuficiente' });
+    // PASO 1: Descontar saldo (once + set, no transaction)
+    const snap = await db.ref(`users/${uid}/creditoReal`).once('value');
+    const saldoActual = snap.val();
+    
+    if (saldoActual === null || saldoActual < amount) {
+      return res.status(400).json({ error: 'Saldo insuficiente', saldoActual });
     }
 
-    const saldoNuevo = res1.snapshot.val();
+    const saldoNuevo = saldoActual - amount;
+    await db.ref(`users/${uid}/creditoReal`).set(saldoNuevo);
 
     // PASO 2: Registrar apuesta
     const betId = Date.now().toString();
