@@ -214,11 +214,13 @@ function parseEvents(espnData, sport) {
 // ==================== ENRIQUECER CON CUOTAS ====================
 
 function limpiarNombre(nombre) {
+  if (!nombre) return '';
   return nombre
     .toLowerCase()
-    .normalize('NFD').replace(/[\u0300-\u036f]/g, '') // quitar tildes
-    .replace(/\b(new york|los angeles|san francisco|san diego|tampa bay|kansas city|st louis|st. louis|green bay|golden state|oklahoma city|portland trail|new england|new orleans)\b/g, '') // quitar ciudades comunes
-    .replace(/[^a-z0-9ñ ]/g, ' ') // solo letras, números y espacios
+    .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+    .replace(/\b(ny|n\.y\.)\b/g, 'new york')
+    .replace(/\b(la|l\.a\.)\b/g, 'los angeles')
+    .replace(/[^a-z0-9ñ ]/g, ' ')
     .replace(/\s+/g, ' ')
     .trim();
 }
@@ -313,10 +315,11 @@ async function enriquecerConCuotas(eventos) {
     let juegos = null;
 
     // Usar caché si es válido (menos de 12h)
-    if (cacheEntry && (Date.now() - cacheEntry.timestamp) < 12 * 60 * 60 * 1000) {
+    if (cacheEntry && (Date.now() - cacheEntry.timestamp) < 5 * 60 * 1000) {
       juegos = cacheEntry.data;
     } else {
       try {
+        console.log(`📡 Consultando The Odds API para: ${sportKey}...`);
         const url = `https://api.the-odds-api.com/v4/sports/${sportKey}/odds?apiKey=${apiKey}&markets=h2h&regions=us`;
         const response = await axios.get(url, { timeout: 5000 });
         if (response.data) {
@@ -346,8 +349,15 @@ async function enriquecerConCuotas(eventos) {
           const bookmakers = game.bookmakers?.[0];
           if (bookmakers?.markets?.[0]?.outcomes) {
             const outcomes = bookmakers.markets[0].outcomes;
-            evento.cuota_local = outcomes.find(o => o.name === 'Home')?.price || evento.cuota_local;
-            evento.cuota_visitante = outcomes.find(o => o.name === 'Away')?.price || evento.cuota_visitante;
+            // Buscar por nombre real del equipo, no por 'Home'/'Away'
+            const outcomeLocal = outcomes.find(o => limpiarNombre(o.name) === homeLimpio);
+            const outcomeVisitante = outcomes.find(o => limpiarNombre(o.name) === awayLimpio);
+            const outcomeEmpate = outcomes.find(o => o.name.toLowerCase() === 'draw' || o.name.toLowerCase() === 'empate');
+            
+            evento.cuota_local = outcomeLocal ? outcomeLocal.price : evento.cuota_local;
+            console.log(`✅ Cuotas reales para [${evento.local} vs ${evento.visitante}]: L:${evento.cuota_local} | V:${evento.cuota_visitante}`);
+            evento.cuota_visitante = outcomeVisitante ? outcomeVisitante.price : evento.cuota_visitante;
+            if (outcomeEmpate) evento.cuota_empate = outcomeEmpate.price;
           }
           break;
         }
