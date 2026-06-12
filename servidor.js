@@ -936,8 +936,7 @@ Máximo 800 palabras.`;
       // Enviar directamente a Telegram sin depender de enviarAlertaTelegram
       await axios.post('https://api.telegram.org/bot8671464180:AAHhu_Ct9-3Q6Arjle-7Xy4DyUGuuNvraBs/sendMessage', {
         chat_id: '-5154764705',
-        text: informe,
-        parse_mode: 'Markdown'
+        text: informe
       }, { timeout: 10000 });
       console.log('✅ Informe diario enviado a Telegram');
     }
