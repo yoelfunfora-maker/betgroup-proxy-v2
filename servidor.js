@@ -754,6 +754,79 @@ app.get('/api/verificacion-geminis', async (req, res) => {
 });
 
 
+
+// ==================== LIQUIDACIÓN DE APUESTAS (TRANSACCIONAL) ====================
+app.post('/api/apuestas/liquidar', async (req, res) => {
+  const { partidoId, resultadoGanador } = req.body;
+  if (!partidoId || !resultadoGanador) {
+    return res.status(400).json({ error: 'partidoId y resultadoGanador requeridos' });
+  }
+  try {
+    const apuestasSnapshot = await db.ref('apuestas')
+      .orderByChild('eventoNombre')
+      .once('value');
+    if (!apuestasSnapshot.exists()) {
+      return res.status(200).json({ message: 'No hay apuestas para liquidar.' });
+    }
+    const apuestas = apuestasSnapshot.val();
+    let liquidadas = 0;
+    for (let apuestaId in apuestas) {
+      const apuesta = apuestas[apuestaId];
+      if (apuesta.estado !== 'pendiente') continue;
+      const gano = (apuesta.tipo === resultadoGanador);
+      const nuevoEstado = gano ? 'ganada' : 'perdida';
+      await db.ref(`apuestas/${apuestaId}`).update({ estado: nuevoEstado });
+      if (gano) {
+        const premio = parseFloat(apuesta.monto) * parseFloat(apuesta.cuota);
+        const usuarioId = apuesta.usuarioId || Object.keys(apuestas)[0];
+        const userRef = db.ref(`users/${usuarioId}/creditoReal`);
+        await userRef.transaction(current => (current || 0) + premio);
+        await db.ref('auditLog').push().set({
+          tipo: 'pago_premio',
+          usuarioId,
+          apuestaId,
+          montoPagado: premio,
+          fecha: Date.now()
+        });
+      }
+      liquidadas++;
+    }
+    res.json({ success: true, liquidadas, message: `${liquidadas} apuestas liquidadas correctamente.` });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+// ==================== FIN LIQUIDACIÓN ====================
+
+
+
+// ==================== REINICIO DEL SISTEMA (MULTI-NODO) ====================
+app.post('/api/admin/reiniciar', async (req, res) => {
+  try {
+    const updates = {
+      'apuestas': null,
+      'historial': null,
+      'auditLog': null,
+      'transacciones': null
+    };
+    await db.ref().update(updates);
+    // Restaurar CEO por defecto
+    await db.ref('users/ceo_root').set({
+      uid: 'ceo_root',
+      nombre: 'CEO Principal',
+      rol: 'CEO',
+      creditoReal: 1000000,
+      creditoPromo: 0,
+      creadoPor: 'sistema'
+    });
+    res.status(200).json({ success: true, message: 'Sistema reiniciado. Auditoría e historial limpios.' });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+// ==================== FIN REINICIO ====================
+
+
 app.listen(PORT, () => {
   console.log(`✅ Proxy escuchando en puerto ${PORT}`);
   precalentarCache();
