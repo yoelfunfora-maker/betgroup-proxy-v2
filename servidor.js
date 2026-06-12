@@ -957,7 +957,7 @@ setInterval(() => {
   const minutos = ahora.getUTCMinutes();
   const fecha = ahora.toISOString().split('T')[0];
 
-  if (hora === 13 && minutos === 0 && fecha !== ultimoDiaEnviado) {
+  if (hora === 13 && minutos >= 0 && minutos <= 4 && fecha !== ultimoDiaEnviado) {
     ultimoDiaEnviado = fecha;
     console.log('⏰ Son las 8:00 AM Cuba, generando informe diario...');
     generarYEnviarInforme();
