@@ -37,24 +37,19 @@ try {
 const TELEGRAM_BOT_TOKEN = '8671464180:AAHhu_Ct9-3Q6Arjle-7Xy4DyUGuuNvraBs';
 const TELEGRAM_CHAT_ID = '-5154764705';
 
-async function enviarAlertaTelegram(texto) {
-  try {
-    await axios.post('https://api.telegram.org/bot8671464180:AAHhu_Ct9-3Q6Arjle-7Xy4DyUGuuNvraBs/sendMessage', {
-      chat_id: '-5154764705',
-      text: texto,
-      parse_mode: 'Markdown'
-    }, { timeout: 5000 });
-  } catch(e) { console.error('Error al enviar Telegram:', e.message); }
+function notifyTelegram(texto) {
+  const url = `https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage`;
+  require('https').get(`${url}?chat_id=${TELEGRAM_CHAT_ID}&text=${encodeURIComponent(texto)}`).on('error', () => {});
 }
 
 process.on('uncaughtException', (err) => {
   console.error('❌ Error no capturado:', err.message);
-  enviarAlertaTelegram(`🚨 BetGroup Proxy ERROR: ${err.message}\n\nStack: ${err.stack?.substring(0, 300) || 'sin stack'}`);
+  notifyTelegram(`🚨 BetGroup Proxy ERROR: ${err.message}\n\nStack: ${err.stack?.substring(0, 300) || 'sin stack'}`);
 });
 
 process.on('unhandledRejection', (reason) => {
   console.error('❌ Promesa rechazada:', reason);
-  enviarAlertaTelegram(`⚠️ BetGroup Proxy PROMESA RECHAZADA: ${reason?.message || reason}`);
+  notifyTelegram(`⚠️ BetGroup Proxy PROMESA RECHAZADA: ${reason?.message || reason}`);
 });
 // ==================== FIN NOTIFICACIÓN TELEGRAM ====================
 
@@ -691,14 +686,45 @@ Pregunta del usuario: "${mensaje.trim()}"`;
 
 // ==================== VERIFICADOR GEMINIS02 ====================
 
+async function obtenerEstadoSistema() {
+  const estado = { proxy: 'ok', agentes: {}, eventos: 0, chatbot: false, saldo_firebase: null, saldo_endpoint: null };
+  try {
+    const agents = await axios.get('https://betgroup-proxy-v2.onrender.com/api/agents-status', { timeout: 5000 });
+    estado.agentes = agents.data?.agents || {};
+  } catch(e) { estado.agentes = { error: e.message }; }
 
+  try {
+    const fixtures = await axios.get('https://betgroup-proxy-v2.onrender.com/api/fixtures', { timeout: 5000 });
+    estado.eventos = fixtures.data?.total || 0;
+  } catch(e) { estado.eventos = -1; }
+
+  try {
+    const chat = await axios.post('https://betgroup-proxy-v2.onrender.com/api/chat',
+      { mensaje: 'Test' }, { timeout: 5000 });
+    estado.chatbot = chat.data?.success || false;
+  } catch(e) { estado.chatbot = false; }
+
+  // Leer saldo de usuario de prueba directamente desde Firebase
+  try {
+    const snap = await db.ref('users/BG_mq7rch3t_h6sjfs1h/creditoReal').once('value');
+    estado.saldo_firebase = snap.val();
+  } catch(e) { estado.saldo_firebase = 'error'; }
+
+  // Leer saldo desde el endpoint /api/saldo
+  try {
+    const resp = await axios.get('https://betgroup-proxy-v2.onrender.com/api/saldo/BG_mq7rch3t_h6sjfs1h', { timeout: 5000 });
+    estado.saldo_endpoint = resp.data?.creditoReal;
+  } catch(e) { estado.saldo_endpoint = 'error'; }
+
+  return estado;
+}
 
 async function notificarTelegram(texto) {
   try {
     await axios.post('https://api.telegram.org/bot8671464180:AAHhu_Ct9-3Q6Arjle-7Xy4DyUGuuNvraBs/sendMessage', {
       chat_id: '-5154764705',
       text: texto,
-      parse_mode: 'Markdown'
+      parse_mode: 'HTML'
     }, { timeout: 5000 });
   } catch(e) { console.error('Error notificando a Telegram:', e.message); }
 }
@@ -739,7 +765,7 @@ app.get('/api/verificacion-geminis', async (req, res) => {
     await axios.post('https://api.telegram.org/bot8671464180:AAHhu_Ct9-3Q6Arjle-7Xy4DyUGuuNvraBs/sendMessage', {
       chat_id: '-5154764705',
       text: '📊 <b>INFORME DE GEMINIS02</b>\n\n' + informe,
-      parse_mode: 'Markdown'
+      parse_mode: 'HTML'
     }, { timeout: 5000 });
 
     res.json({ success: true, estado, informe });
@@ -884,86 +910,6 @@ app.post('/api/admin/aplicar-codigo', async (req, res) => {
   res.json({ success: true, uid, rol, mensaje: `Rol "${rol}" asignado al usuario ${uid}` });
 });
 // ==================== FIN APLICAR CÓDIGO ====================
-
-
-
-let ultimoDiaEnviado = '';
-
-async function generarYEnviarInforme() {
-  try {
-    const cached = getCache('fixtures');
-    if (!cached || !cached.data) return;
-
-    const eventos = cached.data.filter(e => e.cuota_local && e.cuota_local > 1.0);
-    if (eventos.length === 0) {
-      console.log('📊 Sin eventos con cuotas para el informe.');
-      return;
-    }
-
-    let resumen = '';
-    eventos.forEach((e, i) => {
-      resumen += `${i+1}. ${e.local} vs ${e.visitante} (${e.liga || e.sport})`;
-      resumen += `\n   Local: ${e.cuota_local} | Empate: ${e.cuota_empate || 'N/A'} | Visitante: ${e.cuota_visitante}`;
-      resumen += `\n   Estado: ${e.estado === 'live' ? '🔴 En vivo' : '⏳ Programado'}`;
-      if (e.horaInicio) resumen += ` | Hora: ${new Date(e.horaInicio).toLocaleTimeString('es-ES', {hour:'2-digit',minute:'2-digit'})}`;
-      resumen += '\n\n';
-    });
-
-    const prompt = `Eres un analista de apuestas deportivas de BetGroup Pro. Redacta un informe diario atractivo y persuasivo para enviar a los apostadores. Usa los siguientes eventos reales del sistema:
-
-${resumen}
-
-El informe debe incluir:
-- Un título llamativo con la fecha de hoy.
-- Para cada evento, un breve análisis que haga sentir que es una oportunidad imperdible (rachas, datos curiosos, psicología del apostador).
-- Destaca la "Cuota Bomba del Día" (la cuota más alta con posibilidades reales).
-- Sugiere una combinada segura ("Combo del Día").
-- Usa emojis (🔥, ⚽, 💰, 🚀, 💣) y un tono urgente pero profesional.
-- Termina con una llamada a la acción: "📱 Apuesta ahora en BetGroup Pro".
-Máximo 800 palabras.`;
-
-    // Llamar a Groq para redactar
-    const groqKey = Buffer.from(GROQ_B64, 'base64').toString();
-    const resp = await axios.post('https://api.groq.com/openai/v1/chat/completions', {
-      model: 'llama-3.1-8b-instant',
-      messages: [{ role: 'user', content: prompt }],
-      max_tokens: 800,
-      temperature: 0.7
-    }, { headers: { Authorization: 'Bearer ' + groqKey, 'Content-Type': 'application/json' }, timeout: 20000 });
-
-    const informe = resp.data?.choices?.[0]?.message?.content;
-    if (informe) {
-      // Enviar directamente a Telegram sin depender de enviarAlertaTelegram
-      await axios.post('https://api.telegram.org/bot8671464180:AAHhu_Ct9-3Q6Arjle-7Xy4DyUGuuNvraBs/sendMessage', {
-        chat_id: '-5154764705',
-        text: informe
-      }, { timeout: 10000 });
-      console.log('✅ Informe diario enviado a Telegram');
-    }
-  } catch(e) {
-    console.error('❌ Error generando informe diario:', e.message);
-  }
-}
-
-// Endpoint para prueba manual
-app.get('/api/informe-diario', async (req, res) => {
-  await generarYEnviarInforme();
-  res.json({ success: true, message: 'Informe generado y enviado a Telegram' });
-});
-
-// Programar a las 8:00 AM hora Cuba (UTC-5 = 13:00 UTC)
-setInterval(() => {
-  const ahora = new Date();
-  const hora = ahora.getUTCHours();
-  const minutos = ahora.getUTCMinutes();
-  const fecha = ahora.toISOString().split('T')[0];
-
-  if (hora === 13 && minutos >= 0 && minutos <= 4 && fecha !== ultimoDiaEnviado) {
-    ultimoDiaEnviado = fecha;
-    console.log('⏰ Son las 8:00 AM Cuba, generando informe diario...');
-    generarYEnviarInforme();
-  }
-}, 60000);
 
 
 app.listen(PORT, () => {
