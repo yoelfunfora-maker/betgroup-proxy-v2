@@ -81,12 +81,12 @@ const ODDS_API_KEY_1 = process.env.ODDS_API_KEY_1 || '';
 const ODDS_API_KEY_2 = process.env.ODDS_API_KEY_2 || '';
 
 function getApiKey() {
-  const hour = new Date().getHours();
-  // Claves por defecto siempre disponibles
-  if (hour === 0 || hour === 8)  return 'e18abd8956512f34027f0ac3f87fbe52';
-  if (hour === 14 || hour === 18) return '0e31c3149f0afbb009491a0cd80169f4';
-  // Fuera de horario: devolver la clave más reciente para no parar el sistema
-  return '0e31c3149f0afbb009491a0cd80169f4';
+  const horaUTC = new Date().getUTCHours();
+  // 8 AM Cuba = 13 UTC → clave 1
+  // 2 PM Cuba = 19 UTC → clave 2
+  if (horaUTC === 13) return '0e31c3149f0afbb009491a0cd80169f4';
+  if (horaUTC === 19) return 'e18abd8956512f34027f0ac3f87fbe52';
+  return ''; // Fuera de horario: no gastar créditos
 }
 
 // ==================== ESPN FETCH ====================
@@ -368,7 +368,7 @@ async function enriquecerConCuotas(eventos) {
     let juegos = null;
 
     // Usar caché si es válido (menos de 12h)
-    if (cacheEntry && (Date.now() - cacheEntry.timestamp) < 5 * 60 * 1000) {
+    if (cacheEntry && (Date.now() - cacheEntry.timestamp) < 12 * 60 * 60 * 1000) {
       juegos = cacheEntry.data;
     } else {
       try {
