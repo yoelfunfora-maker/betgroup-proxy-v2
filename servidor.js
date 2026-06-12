@@ -512,30 +512,22 @@ app.get('/api/fixtures', async (req, res) => {
 });
 
 app.post('/api/apostar', async (req, res) => {
-  const { uid, amount, evento, tipo, cuota } = req.body;
-
+  const { uid, amount, evento, tipo, cuota, tipoSaldo } = req.body;
   if (!uid || !amount || !evento || !tipo || !cuota) {
     return res.status(400).json({ error: 'Parámetros faltantes' });
   }
-
+  const saldoCampo = (tipoSaldo === 'promo') ? 'creditoPromo' : 'creditoReal';
   try {
-    if (!db) {
-      return res.status(500).json({ error: 'Firebase no configurado' });
-    }
-
-    const snap = await db.ref(`users/${uid}/creditoReal`).once('value');
+    const snap = await db.ref(`users/${uid}/${saldoCampo}`).once('value');
     const saldoActual = snap.val();
-
     if (saldoActual === null || saldoActual < amount) {
       return res.status(400).json({
         error: 'Saldo insuficiente',
         saldoActual: saldoActual || 0
       });
     }
-
     const saldoNuevo = saldoActual - amount;
-    await db.ref(`users/${uid}/creditoReal`).set(saldoNuevo);
-
+    await db.ref(`users/${uid}/${saldoCampo}`).set(saldoNuevo);
     const betId = Date.now().toString();
     await db.ref(`apuestas/${uid}/${betId}`).set({
       eventoNombre: evento,
@@ -544,14 +536,10 @@ app.post('/api/apostar', async (req, res) => {
       cuota: cuota,
       ganancia: Math.floor(amount * cuota),
       estado: 'pendiente',
-      fecha: Date.now()
+      fecha: Date.now(),
+      tipoSaldo: tipoSaldo || 'real'
     });
-
-    res.json({
-      success: true,
-      saldoNuevo: saldoNuevo,
-      betId: betId
-    });
+    res.json({ success: true, saldoNuevo, betId });
   } catch(err) {
     console.error('Error /api/apostar:', err);
     res.status(500).json({ error: err.message });
@@ -825,6 +813,25 @@ app.post('/api/admin/reiniciar', async (req, res) => {
   }
 });
 // ==================== FIN REINICIO ====================
+
+
+
+// ==================== REFERIDOS FILTRADOS POR SUBADMIN ====================
+app.get('/api/usuarios/mis-referidos', async (req, res) => {
+  const subadminUid = req.query.subadminUid;
+  if (!subadminUid) return res.status(400).json({ error: 'subadminUid requerido' });
+  try {
+    const snapshot = await db.ref('users')
+      .orderByChild('creadoPor')
+      .equalTo(subadminUid)
+      .once('value');
+    const referidos = snapshot.val() ? Object.values(snapshot.val()) : [];
+    res.json(referidos);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+// ==================== FIN REFERIDOS ====================
 
 
 app.listen(PORT, () => {
