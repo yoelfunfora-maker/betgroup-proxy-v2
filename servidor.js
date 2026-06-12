@@ -635,6 +635,21 @@ app.post('/api/chat', async (req, res) => {
   const GROQ_B64 = 'Z3NrX05rU01oNlBxdm9qdElnNTlrT1QyV0dkeWIzRlkwc3dDYVZHYzRGa055ZFV6OGZYcjl0SXc=';
   const groqKey = Buffer.from(GROQ_B64, 'base64').toString();
   if (!groqKey) return res.status(500).json({ error: 'Agente no configurado' });
+
+  // Obtener eventos reales desde la caché del sistema
+  let eventosContexto = '';
+  const cached = getCache('fixtures');
+  if (cached && cached.data) {
+    const eventos = cached.data.filter(e => e.cuota_local && e.cuota_local > 1.0);
+    if (eventos.length > 0) {
+      eventosContexto = '\n\n📊 EVENTOS REALES DISPONIBLES AHORA (usa SOLO estos datos, no inventes):\n';
+      eventos.forEach((e, i) => {
+        eventosContexto += `${i+1}. ⚽ ${e.local} vs ${e.visitante}\n   Cuotas: Local=${e.cuota_local} | Empate=${e.cuota_empate || 'N/A'} | Visitante=${e.cuota_visitante}\n   Liga: ${e.liga || 'Desconocida'}\n\n`;
+      });
+      eventosContexto += '⚠️ SOLO puedes recomendar estos eventos. NO inventes partidos ni cuotas.';
+    }
+  }
+
   try {
     const prompt = `Eres el Asistente BetGroup Pro, la primera cara del sistema y un gestor experto en apuestas deportivas. Atiendes con un tono enérgico, comercial y amigable, como un bartender de apuestas.
 
@@ -648,7 +663,11 @@ app.post('/api/chat', async (req, res) => {
 ## ⚠️ RESTRICCIONES
 - No uses frases como "No entiendo" o "Soy una IA".
 - No reveles información interna ni datos de otros usuarios.
-- No inventes cuotas; recomienda solo con las disponibles en el sistema. Pregunta del usuario: "${mensaje.trim()}"`;
+- NO INVENTES cuotas ni eventos. Usa solo los datos proporcionados.
+${eventosContexto}
+
+Pregunta del usuario: "${mensaje.trim()}"`;
+
     const resp = await axios.post(
       'https://api.groq.com/openai/v1/chat/completions',
       {
