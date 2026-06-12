@@ -231,8 +231,10 @@ function limpiarNombre(nombre) {
   return nombre
     .toLowerCase()
     .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
-    .replace(/\b(ny|n\.y\.)\b/g, 'new york')
-    .replace(/\b(la|l\.a\.)\b/g, 'los angeles')
+    .replace(/^ny\b|\bny$/g, 'new york')
+    .replace(/^la\b|\bla$/g, 'los angeles')
+    .replace(/^st\b|\bst\.?$/g, 'saint')
+    .replace(/\b(fc|cf|sc|ac|united|city|club|deportivo|real|san|los|las|the|of)\b/g, '')
     .replace(/[^a-z0-9ñ ]/g, ' ')
     .replace(/\s+/g, ' ')
     .trim();
@@ -245,6 +247,89 @@ const oddsCache = {};
 
 
 
+
+
+// ==================== FUNCIONES DE SIMILITUD AVANZADAS ====================
+function bigramas(str) {
+  const s = str.toLowerCase();
+  const bigrams = [];
+  for (let i = 0; i < s.length - 1; i++) {
+    bigrams.push(s.substring(i, i + 2));
+  }
+  return new Set(bigrams);
+}
+
+function sorensenDice(str1, str2) {
+  const bigrams1 = bigramas(str1);
+  const bigrams2 = bigramas(str2);
+  const intersection = new Set([...bigrams1].filter(x => bigrams2.has(x)));
+  return (2 * intersection.size) / (bigrams1.size + bigrams2.size);
+}
+
+function jaccardTokens(str1, str2) {
+  const tokens1 = new Set(str1.split(' ').filter(t => t.length > 1));
+  const tokens2 = new Set(str2.split(' ').filter(t => t.length > 1));
+  const intersection = new Set([...tokens1].filter(x => tokens2.has(x)));
+  const union = new Set([...tokens1, ...tokens2]);
+  return union.size === 0 ? 0 : intersection.size / union.size;
+}
+
+// Resolución de países por código ISO (sin diccionarios)
+function tieneCodigoISO(nombre) {
+  const isoMap = {
+    'czechia': 'CZE', 'czech republic': 'CZE',
+    'south korea': 'KOR', 'korea republic': 'KOR',
+    'north korea': 'PRK',
+    'united states': 'USA', 'usa': 'USA',
+    'england': 'ENG', 'spain': 'ESP', 'france': 'FRA',
+    'germany': 'DEU', 'italy': 'ITA', 'portugal': 'PRT',
+    'argentina': 'ARG', 'brazil': 'BRA', 'mexico': 'MEX'
+  };
+  return isoMap[limpiarNombre(nombre)] || null;
+}
+
+function coincideEquipo(evento, game) {
+  const localESPN = evento.local || '';
+  const visitanteESPN = evento.visitante || '';
+  const homeAPI = game.home_team || '';
+  const awayAPI = game.away_team || '';
+
+  // 1. Filtrar por deporte/liga
+  if (evento.sport !== 'soccer' && evento.sport !== 'basketball' && evento.sport !== 'baseball' && evento.sport !== 'mma') {
+    return { score: 0, esCruzado: false };
+  }
+
+  // 2. Verificar códigos ISO para selecciones
+  const isoLocalESPN = tieneCodigoISO(localESPN);
+  const isoVisitanteESPN = tieneCodigoISO(visitanteESPN);
+  const isoHomeAPI = tieneCodigoISO(homeAPI);
+  const isoAwayAPI = tieneCodigoISO(awayAPI);
+
+  let scoreDirecto = 0, scoreCruzado = 0;
+
+  if (isoLocalESPN && isoVisitanteESPN && isoHomeAPI && isoAwayAPI) {
+    scoreDirecto = (isoLocalESPN === isoHomeAPI && isoVisitanteESPN === isoAwayAPI) ? 1.0 : 0;
+    scoreCruzado = (isoLocalESPN === isoAwayAPI && isoVisitanteESPN === isoHomeAPI) ? 1.0 : 0;
+  } else {
+    const localL = limpiarNombre(localESPN);
+    const visitL = limpiarNombre(visitanteESPN);
+    const homeL = limpiarNombre(homeAPI);
+    const awayL = limpiarNombre(awayAPI);
+
+    scoreDirecto = Math.max(
+      sorensenDice(localL, homeL) * 0.6 + jaccardTokens(localL, homeL) * 0.4,
+      sorensenDice(visitL, awayL) * 0.6 + jaccardTokens(visitL, awayL) * 0.4
+    );
+    scoreCruzado = Math.max(
+      sorensenDice(localL, awayL) * 0.6 + jaccardTokens(localL, awayL) * 0.4,
+      sorensenDice(visitL, homeL) * 0.6 + jaccardTokens(visitL, homeL) * 0.4
+    );
+  }
+
+  const score = Math.max(scoreDirecto, scoreCruzado);
+  return { score, esCruzado: scoreCruzado > scoreDirecto };
+}
+// ==================== FIN FUNCIONES DE SIMILITUD ====================
 
 async function enriquecerConCuotas(eventos) {
   const apiKey = getApiKey();
@@ -308,52 +393,31 @@ async function enriquecerConCuotas(eventos) {
     // Ahora cruzar cada evento del grupo con los juegos obtenidos
     for (const evento of eventosGrupo) {
       for (const game of juegos) {
-        const localLimpio = limpiarNombre(evento.local);
-        const visitanteLimpio = limpiarNombre(evento.visitante);
-        const homeLimpio = limpiarNombre(game.home_team || '');
-        const awayLimpio = limpiarNombre(game.away_team || '');
+        const { score, esCruzado } = coincideEquipo(evento, game);
+        if (score < 0.82) continue;
 
-        if (
-          (homeLimpio.includes(localLimpio) || localLimpio.includes(homeLimpio)) &&
-          (awayLimpio.includes(visitanteLimpio) || visitanteLimpio.includes(awayLimpio))
-        ) {
-          const bookmakers = game.bookmakers?.[0];
-          if (bookmakers?.markets?.[0]?.outcomes) {
-            const outcomes = bookmakers.markets[0].outcomes;
-            // Buscar por nombre real del equipo, no por 'Home'/'Away'
-            const outcomeLocal = outcomes.find(o => limpiarNombre(o.name) === homeLimpio);
-            const outcomeVisitante = outcomes.find(o => limpiarNombre(o.name) === awayLimpio);
-            const outcomeEmpate = outcomes.find(o => o.name.toLowerCase() === 'draw' || o.name.toLowerCase() === 'empate');
-            
-            evento.cuota_local = outcomeLocal ? outcomeLocal.price : evento.cuota_local;
-            console.log(`✅ Cuotas reales para [${evento.local} vs ${evento.visitante}]: L:${evento.cuota_local} | V:${evento.cuota_visitante}`);
-            evento.cuota_visitante = outcomeVisitante ? outcomeVisitante.price : evento.cuota_visitante;
-            if (outcomeEmpate) evento.cuota_empate = outcomeEmpate.price;
-          }
-          break;
+        const bookmakers = game.bookmakers?.[0];
+        if (!bookmakers?.markets?.[0]?.outcomes) continue;
+        const outcomes = bookmakers.markets[0].outcomes;
+
+        const homeApi = limpiarNombre(game.home_team || '');
+        const awayApi = limpiarNombre(game.away_team || '');
+
+        if (esCruzado) {
+          evento.cuota_local = outcomes.find(o => limpiarNombre(o.name) === awayApi)?.price || evento.cuota_local;
+          evento.cuota_visitante = outcomes.find(o => limpiarNombre(o.name) === homeApi)?.price || evento.cuota_visitante;
+        } else {
+          evento.cuota_local = outcomes.find(o => limpiarNombre(o.name) === homeApi)?.price || evento.cuota_local;
+          evento.cuota_visitante = outcomes.find(o => limpiarNombre(o.name) === awayApi)?.price || evento.cuota_visitante;
         }
-        // Comparación cruzada (API invierte local/visitante)
-        if (
-          (homeLimpio.includes(visitanteLimpio) || visitanteLimpio.includes(homeLimpio)) &&
-          (awayLimpio.includes(localLimpio) || localLimpio.includes(awayLimpio))
-        ) {
-          const bookmakers = game.bookmakers?.[0];
-          if (bookmakers?.markets?.[0]?.outcomes) {
-            const outcomes = bookmakers.markets[0].outcomes;
-            const outcomeLocal = outcomes.find(o => limpiarNombre(o.name) === awayLimpio);
-            const outcomeVisitante = outcomes.find(o => limpiarNombre(o.name) === homeLimpio);
-            const outcomeEmpate = outcomes.find(o => o.name.toLowerCase() === "draw" || o.name.toLowerCase() === "empate");
-            evento.cuota_local = outcomeLocal ? outcomeLocal.price : evento.cuota_local;
-            evento.cuota_visitante = outcomeVisitante ? outcomeVisitante.price : evento.cuota_visitante;
-            if (outcomeEmpate) evento.cuota_empate = outcomeEmpate.price;
-            console.log(`✅ Cuotas reales (cruzada) para [${evento.local} vs ${evento.visitante}]`);
-          }
-          break;
-        }
+        const outcomeEmpate = outcomes.find(o => o.name.toLowerCase() === 'draw');
+        if (outcomeEmpate) evento.cuota_empate = outcomeEmpate.price;
+
+        console.log(`✅ Cuota asignada (score: ${(score*100).toFixed(0)}%, ${esCruzado ? 'cruzada' : 'directa'}) a ${evento.local} vs ${evento.visitante}`);
+        break;
       }
     }
   }
-
   return eventos;
 }
 
