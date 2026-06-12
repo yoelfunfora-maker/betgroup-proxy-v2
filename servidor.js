@@ -254,7 +254,12 @@ async function enriquecerConCuotas(eventos) {
   }
 
   const sportKeyMap = {
-    'soccer': 'soccer_epl',
+    'soccer': (liga) => {
+    const l = (liga || '').toLowerCase();
+    if (l.includes('world') || l.includes('copa') || l.includes('fifa')) return 'soccer_fifa_world_cup';
+    if (l.includes('friendly') || l.includes('amistoso')) return 'soccer_international_friendly';
+    return 'soccer_epl';
+  },
     'basketball': 'basketball_nba',
     'baseball': 'baseball_mlb',
     'mma': 'mma_mixed_martial_arts',
@@ -264,7 +269,9 @@ async function enriquecerConCuotas(eventos) {
   // Agrupar eventos por sportKey
   const grupos = {};
   for (const evento of eventos) {
-    const sportKey = sportKeyMap[evento.sport];
+    const sportKey = typeof sportKeyMap[evento.sport] === 'function' 
+      ? sportKeyMap[evento.sport](evento.liga) 
+      : sportKeyMap[evento.sport];
     if (!sportKey) continue;
     if (!grupos[sportKey]) grupos[sportKey] = [];
     grupos[sportKey].push(evento);
@@ -281,6 +288,9 @@ async function enriquecerConCuotas(eventos) {
     } else {
       try {
         console.log(`📡 Consultando The Odds API para: ${sportKey}...`);
+      if (sportKey === 'mma_mixed_martial_arts') {
+        console.log('🔍 MMA: Buscando cuotas para eventos de artes marciales mixtas');
+      }
         const url = `https://api.the-odds-api.com/v4/sports/${sportKey}/odds?apiKey=${apiKey}&markets=h2h&regions=us`;
         const response = await axios.get(url, { timeout: 5000 });
         if (response.data) {
