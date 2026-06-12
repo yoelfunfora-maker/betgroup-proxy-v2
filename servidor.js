@@ -834,6 +834,47 @@ app.get('/api/usuarios/mis-referidos', async (req, res) => {
 // ==================== FIN REFERIDOS ====================
 
 
+
+// ==================== GENERAR CÓDIGO POR INICIAL DEL ROL ====================
+app.get('/api/admin/generar-codigo', async (req, res) => {
+  const { rol = 'ceo' } = req.query;
+  const rolesValidos = ['ceo', 'admin', 'moderador', 'soporte'];
+  if (!rolesValidos.includes(rol)) return res.status(400).json({ error: 'Rol no válido' });
+
+  const ahora = new Date();
+  const dia = String(ahora.getDate()).padStart(2, '0');
+  const mes = String(ahora.getMonth() + 1).padStart(2, '0');
+  const año = String(ahora.getFullYear()).slice(-2);
+  const hora = String(ahora.getHours()).padStart(2, '0');
+  const minuto = String(ahora.getMinutes()).padStart(2, '0');
+  const rolInicial = rol.charAt(0).toUpperCase();
+  const fecha = `${dia}${mes}${año}${hora}${minuto}`;
+  const random = Math.random().toString(36).substring(2, 6).toUpperCase();
+  const codigo = `${rolInicial}${fecha}${random}`;
+
+  res.json({ success: true, codigo, rol, formato: `${rolInicial}[DÍA][MES][AÑO][HORA][MINUTO][RANDOM_4]` });
+});
+// ==================== FIN GENERAR CÓDIGO ====================
+
+
+
+// ==================== APLICAR CÓDIGO CEO ====================
+app.post('/api/admin/aplicar-codigo', async (req, res) => {
+  const { codigo, uid } = req.body;
+  if (!codigo || !uid) return res.status(400).json({ error: 'Código o UID faltante' });
+
+  const rolMap = { 'C': 'ceo', 'A': 'admin', 'M': 'moderador', 'S': 'soporte' };
+  const rol = rolMap[codigo.charAt(0)];
+  if (!rol) return res.status(400).json({ error: 'Código no válido' });
+
+  await db.ref(`users/${uid}/rol`).set(rol);
+  await db.ref(`auditLog/${Date.now()}`).set({ accion: 'rol_asignado', uid, rol, codigo, fecha: new Date().toISOString() });
+
+  res.json({ success: true, uid, rol, mensaje: `Rol "${rol}" asignado al usuario ${uid}` });
+});
+// ==================== FIN APLICAR CÓDIGO ====================
+
+
 app.listen(PORT, () => {
   console.log(`✅ Proxy escuchando en puerto ${PORT}`);
   precalentarCache();
