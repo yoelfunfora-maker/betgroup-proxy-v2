@@ -39,14 +39,12 @@ const TELEGRAM_CHAT_ID = '-5154764705';
 
 async function enviarAlertaTelegram(texto) {
   try {
-    console.log('📤 [TELEGRAM] Enviando mensaje de ' + texto.length + ' caracteres...');
     await axios.post('https://api.telegram.org/bot8671464180:AAHhu_Ct9-3Q6Arjle-7Xy4DyUGuuNvraBs/sendMessage', {
       chat_id: '-5154764705',
       text: texto,
       parse_mode: 'HTML'
     }, { timeout: 5000 });
-    console.log('✅ [TELEGRAM] Mensaje enviado correctamente');
-  } catch(e) { console.error('❌ [TELEGRAM] Error:', e.message); }
+  } catch(e) { console.error('Error al enviar Telegram:', e.message); }
 }
 
 process.on('uncaughtException', (err) => {
@@ -496,8 +494,7 @@ app.get('/api/health', (req, res) => {
 
 app.get('/api/fixtures', async (req, res) => {
   try {
-    console.log('📊 [INFORME] Iniciando generación de informe...');
-  const cached = getCache('fixtures');
+    const cached = getCache('fixtures');
     if (cached) {
       return res.json(cached);
     }
@@ -890,23 +887,19 @@ app.post('/api/admin/aplicar-codigo', async (req, res) => {
 
 
 
-// ==================== INFORME DIARIO (8:00 AM CUBA) ====================
 let ultimoDiaEnviado = '';
 
 async function generarYEnviarInforme() {
   try {
     const cached = getCache('fixtures');
-    if (!cached || !cached.data) { console.log('⚠️ [INFORME] No hay datos en caché'); return; }
+    if (!cached || !cached.data) return;
 
-    // Filtrar eventos con cuotas reales
     const eventos = cached.data.filter(e => e.cuota_local && e.cuota_local > 1.0);
-    console.log(`📊 [INFORME] Eventos con cuotas: ${eventos.length}`);
-  if (eventos.length === 0) {
+    if (eventos.length === 0) {
       console.log('📊 Sin eventos con cuotas para el informe.');
       return;
     }
 
-    // Construir resumen para Groq
     let resumen = '';
     eventos.forEach((e, i) => {
       resumen += `${i+1}. ${e.local} vs ${e.visitante} (${e.liga || e.sport})`;
@@ -931,7 +924,6 @@ Máximo 800 palabras.`;
 
     // Llamar a Groq para redactar
     const groqKey = Buffer.from(GROQ_B64, 'base64').toString();
-    console.log('🤖 [INFORME] Llamando a Groq...');
     const resp = await axios.post('https://api.groq.com/openai/v1/chat/completions', {
       model: 'llama-3.1-8b-instant',
       messages: [{ role: 'user', content: prompt }],
@@ -940,11 +932,13 @@ Máximo 800 palabras.`;
     }, { headers: { Authorization: 'Bearer ' + groqKey, 'Content-Type': 'application/json' }, timeout: 20000 });
 
     const informe = resp.data?.choices?.[0]?.message?.content;
-    console.log('📄 [INFORME] Respuesta de Groq recibida, longitud:', informe ? informe.length : 0);
     if (informe) {
-      console.log('📤 [INFORME] Enviando a Telegram...');
-      await enviarAlertaTelegram(informe);
-      console.log('✅ [INFORME] Enviado a Telegram correctamente');
+      // Enviar directamente a Telegram sin depender de enviarAlertaTelegram
+      await axios.post('https://api.telegram.org/bot8671464180:AAHhu_Ct9-3Q6Arjle-7Xy4DyUGuuNvraBs/sendMessage', {
+        chat_id: '-5154764705',
+        text: informe,
+        parse_mode: 'HTML'
+      }, { timeout: 10000 });
       console.log('✅ Informe diario enviado a Telegram');
     }
   } catch(e) {
@@ -970,8 +964,7 @@ setInterval(() => {
     console.log('⏰ Son las 8:00 AM Cuba, generando informe diario...');
     generarYEnviarInforme();
   }
-}, 60000); // Verificar cada minuto
-// ==================== FIN INFORME DIARIO ====================
+}, 60000);
 
 
 app.listen(PORT, () => {
