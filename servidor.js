@@ -332,6 +332,24 @@ async function enriquecerConCuotas(eventos) {
           }
           break;
         }
+        // Comparación cruzada (API invierte local/visitante)
+        if (
+          (homeLimpio.includes(visitanteLimpio) || visitanteLimpio.includes(homeLimpio)) &&
+          (awayLimpio.includes(localLimpio) || localLimpio.includes(awayLimpio))
+        ) {
+          const bookmakers = game.bookmakers?.[0];
+          if (bookmakers?.markets?.[0]?.outcomes) {
+            const outcomes = bookmakers.markets[0].outcomes;
+            const outcomeLocal = outcomes.find(o => limpiarNombre(o.name) === awayLimpio);
+            const outcomeVisitante = outcomes.find(o => limpiarNombre(o.name) === homeLimpio);
+            const outcomeEmpate = outcomes.find(o => o.name.toLowerCase() === "draw" || o.name.toLowerCase() === "empate");
+            evento.cuota_local = outcomeLocal ? outcomeLocal.price : evento.cuota_local;
+            evento.cuota_visitante = outcomeVisitante ? outcomeVisitante.price : evento.cuota_visitante;
+            if (outcomeEmpate) evento.cuota_empate = outcomeEmpate.price;
+            console.log(`✅ Cuotas reales (cruzada) para [${evento.local} vs ${evento.visitante}]`);
+          }
+          break;
+        }
       }
     }
   }
