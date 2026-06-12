@@ -167,10 +167,19 @@ function parseEvents(espnData, sport) {
       }
 
       const getName = (c) => {
-        return c?.athlete?.displayName || c?.team?.displayName || 'Desconocido';
+        const name = c?.athlete?.displayName || c?.team?.displayName || 'Desconocido';
+        // Si el nombre es TBD o null, devolver null para filtrar el evento
+        if (!name || name === 'TBD' || name === 'None') return null;
+        return name;
       };
       
-      const getLogo = (c) => c?.team?.logo || null;
+      const getLogo = (c) => {
+    // Deportes de equipo: usar logo del equipo
+    if (c?.team?.logo) return c.team.logo;
+    // Deportes individuales: usar foto del atleta
+    if (c?.athlete?.headshot) return c.athlete.headshot;
+    return null;
+  };
 
       const status = competitionStatus || ev.status?.type;
       if (!status) continue;
@@ -181,6 +190,10 @@ function parseEvents(espnData, sport) {
 
       const homeScore = home.score || '0';
       const awayScore = away.score || '0';
+
+            const nombreLocal = getName(home);
+      const nombreVisitante = getName(away);
+      if (!nombreLocal || !nombreVisitante) continue; // Saltar eventos TBD
 
       events.push({
         id: ev.id,
@@ -244,7 +257,8 @@ async function enriquecerConCuotas(eventos) {
     'soccer': 'soccer_epl',
     'basketball': 'basketball_nba',
     'baseball': 'baseball_mlb',
-    'mma': 'mma_mixed_martial_arts'
+    'mma': 'mma_mixed_martial_arts',
+    'tennis': 'tennis_atp'
   };
 
   // Agrupar eventos por sportKey
