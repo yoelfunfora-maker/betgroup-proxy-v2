@@ -37,34 +37,24 @@ try {
 const TELEGRAM_BOT_TOKEN = '8671464180:AAHhu_Ct9-3Q6Arjle-7Xy4DyUGuuNvraBs';
 const TELEGRAM_CHAT_ID = '-5154764705';
 
-async function enviarAlertaTelegram(texto) {
-  try {
-    await axios.post('https://api.telegram.org/bot8671464180:AAHhu_Ct9-3Q6Arjle-7Xy4DyUGuuNvraBs/sendMessage', {
-      chat_id: '-5154764705',
-      text: texto,
-      parse_mode: 'HTML'
-    }, { timeout: 5000 });
-  } catch(e) { console.error('Error al enviar Telegram:', e.message); }
+function notifyTelegram(texto) {
+  const url = `https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage`;
+  require('https').get(`${url}?chat_id=${TELEGRAM_CHAT_ID}&text=${encodeURIComponent(texto)}`).on('error', () => {});
 }
 
 process.on('uncaughtException', (err) => {
   console.error('❌ Error no capturado:', err.message);
-  enviarAlertaTelegram(`🚨 BetGroup Proxy ERROR: ${err.message}\n\nStack: ${err.stack?.substring(0, 300) || 'sin stack'}`);
+  notifyTelegram(`🚨 BetGroup Proxy ERROR: ${err.message}\n\nStack: ${err.stack?.substring(0, 300) || 'sin stack'}`);
 });
 
 process.on('unhandledRejection', (reason) => {
   console.error('❌ Promesa rechazada:', reason);
-  enviarAlertaTelegram(`⚠️ BetGroup Proxy PROMESA RECHAZADA: ${reason?.message || reason}`);
+  notifyTelegram(`⚠️ BetGroup Proxy PROMESA RECHAZADA: ${reason?.message || reason}`);
 });
 // ==================== FIN NOTIFICACIÓN TELEGRAM ====================
 
 
   db = admin.database();
-
-// Claves de agentes (respaldo hardcodeado si process.env no existe)
-const GEMINI_B64 = 'QVEuQWI4Uk42SVNDbFk0WnNqSXRpZlNCaXZkeUppblBjMUdoNEljMUJGM2Nxc3RBVjRsa2c=';
-const GROQ_B64 = 'Z3NrX05rU01oNlBxdm9qdElnNTlrT1QyV0dkeWIzRlkwc3dDYVZHYzRGa055ZFV6OGZYcjl0SXc=';
-
 } catch(error) {
   console.error('Error al inicializar Firebase Admin SDK:', error.message);
   process.exit(1);
@@ -601,8 +591,8 @@ app.get('/api/saldo/:uid', async (req, res) => {
 
 
 app.get('/api/agents-status', async (req, res) => {
-  // Claves gestionadas por variables de entorno en Render
-  
+  const GEMINI_B64 = 'QVEuQWI4Uk42SVNDbFk0WnNqSXRpZlNCaXZkeUppblBjMUdoNEljMUJGM2Nxc3RBVjRsa2c=';
+  const GROQ_B64 = 'Z3NrX05rU01oNlBxdm9qdElnNTlrT1QyV0dkeWIzRlkwc3dDYVZHYzRGa055ZFV6OGZYcjl0SXc=';
   const geminiKey = Buffer.from(GEMINI_B64, 'base64').toString();
   const groqKey   = Buffer.from(GROQ_B64, 'base64').toString();
   const status = { Geminis02: 'unknown', Agente_groc01: 'unknown', Athos_Tavily: 'unknown' };
@@ -642,7 +632,7 @@ app.post('/api/chat', async (req, res) => {
   if (!mensaje || typeof mensaje !== 'string' || mensaje.trim().length === 0) {
     return res.status(400).json({ error: 'Mensaje vacío o inválido' });
   }
-  
+  const GROQ_B64 = 'Z3NrX05rU01oNlBxdm9qdElnNTlrT1QyV0dkeWIzRlkwc3dDYVZHYzRGa055ZFV6OGZYcjl0SXc=';
   const groqKey = Buffer.from(GROQ_B64, 'base64').toString();
   if (!groqKey) return res.status(500).json({ error: 'Agente no configurado' });
 
@@ -696,7 +686,38 @@ Pregunta del usuario: "${mensaje.trim()}"`;
 
 // ==================== VERIFICADOR GEMINIS02 ====================
 
+async function obtenerEstadoSistema() {
+  const estado = { proxy: 'ok', agentes: {}, eventos: 0, chatbot: false, saldo_firebase: null, saldo_endpoint: null };
+  try {
+    const agents = await axios.get('https://betgroup-proxy-v2.onrender.com/api/agents-status', { timeout: 5000 });
+    estado.agentes = agents.data?.agents || {};
+  } catch(e) { estado.agentes = { error: e.message }; }
 
+  try {
+    const fixtures = await axios.get('https://betgroup-proxy-v2.onrender.com/api/fixtures', { timeout: 5000 });
+    estado.eventos = fixtures.data?.total || 0;
+  } catch(e) { estado.eventos = -1; }
+
+  try {
+    const chat = await axios.post('https://betgroup-proxy-v2.onrender.com/api/chat',
+      { mensaje: 'Test' }, { timeout: 5000 });
+    estado.chatbot = chat.data?.success || false;
+  } catch(e) { estado.chatbot = false; }
+
+  // Leer saldo de usuario de prueba directamente desde Firebase
+  try {
+    const snap = await db.ref('users/BG_mq7rch3t_h6sjfs1h/creditoReal').once('value');
+    estado.saldo_firebase = snap.val();
+  } catch(e) { estado.saldo_firebase = 'error'; }
+
+  // Leer saldo desde el endpoint /api/saldo
+  try {
+    const resp = await axios.get('https://betgroup-proxy-v2.onrender.com/api/saldo/BG_mq7rch3t_h6sjfs1h', { timeout: 5000 });
+    estado.saldo_endpoint = resp.data?.creditoReal;
+  } catch(e) { estado.saldo_endpoint = 'error'; }
+
+  return estado;
+}
 
 async function notificarTelegram(texto) {
   try {
