@@ -750,36 +750,42 @@ app.post('/api/apuestas/liquidar', async (req, res) => {
     return res.status(400).json({ error: 'partidoId y resultadoGanador requeridos' });
   }
   try {
-    const apuestasSnapshot = await db.ref('apuestas')
-      .orderByChild('eventoNombre')
-      .once('value');
-    if (!apuestasSnapshot.exists()) {
+    const snapshot = await db.ref('apuestas').once('value');
+    if (!snapshot.exists()) {
       return res.status(200).json({ message: 'No hay apuestas para liquidar.' });
     }
-    const apuestas = apuestasSnapshot.val();
+    const todosUsuarios = snapshot.val();
     let liquidadas = 0;
-    for (let apuestaId in apuestas) {
-      const apuesta = apuestas[apuestaId];
-      if (apuesta.estado !== 'pendiente') continue;
-      const gano = (apuesta.tipo === resultadoGanador);
-      const nuevoEstado = gano ? 'ganada' : 'perdida';
-      await db.ref(`apuestas/${apuestaId}`).update({ estado: nuevoEstado });
-      if (gano) {
-        const premio = parseFloat(apuesta.monto) * parseFloat(apuesta.cuota);
-        const usuarioId = apuesta.usuarioId || Object.keys(apuestas)[0];
-        const userRef = db.ref(`users/${usuarioId}/creditoReal`);
-        await userRef.transaction(current => (current || 0) + premio);
-        await db.ref('auditLog').push().set({
-          tipo: 'pago_premio',
-          usuarioId,
-          apuestaId,
-          montoPagado: premio,
-          fecha: Date.now()
-        });
+
+    for (const uid of Object.keys(todosUsuarios)) {
+      const apuestasUsuario = todosUsuarios[uid];
+      for (const betId of Object.keys(apuestasUsuario)) {
+        const apuesta = apuestasUsuario[betId];
+        if (apuesta.estado !== 'pendiente') continue;
+        if (apuesta.eventoNombre !== partidoId) continue;
+
+        const gano = (apuesta.tipo === resultadoGanador);
+        const nuevoEstado = gano ? 'ganada' : 'perdida';
+
+        await db.ref(`apuestas/${uid}/${betId}`).update({ estado: nuevoEstado });
+
+        if (gano) {
+          const premio = parseFloat(apuesta.monto) * parseFloat(apuesta.cuota);
+          const userRef = db.ref(`users/${uid}/creditoReal`);
+          await userRef.transaction(current => (current || 0) + premio);
+
+          await db.ref('auditLog').push().set({
+            tipo: 'pago_premio',
+            uid,
+            betId,
+            montoPagado: premio,
+            fecha: Date.now()
+          });
+        }
+        liquidadas++;
       }
-      liquidadas++;
     }
-    res.json({ success: true, liquidadas, message: `${liquidadas} apuestas liquidadas correctamente.` });
+    res.json({ success: true, liquidadas, message: `${liquidadas} apuestas liquidadas.` });
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
