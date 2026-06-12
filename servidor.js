@@ -894,6 +894,10 @@ app.post('/api/admin/aplicar-codigo', async (req, res) => {
 let ultimoDiaEnviado = '';
 
 async function generarYEnviarInforme() {
+  // 🔥 PRUEBA DIRECTA TEMPORAL
+  await enviarAlertaTelegram('🧪 Prueba interna: el flujo de envío funciona correctamente.');
+  console.log('✅ Prueba directa enviada a Telegram');
+  return; // Detener el flujo normal para la prueba
   try {
     const cached = getCache('fixtures');
     if (!cached || !cached.data) { console.log('⚠️ [INFORME] No hay datos en caché'); return; }
