@@ -77,8 +77,8 @@ function setCache(key, data) {
 
 // ==================== API KEYS ====================
 
-const ODDS_API_KEY_1 = process.env.ODDS_API_KEY_1 || '';
-const ODDS_API_KEY_2 = process.env.ODDS_API_KEY_2 || '';
+const ODDS_API_KEY_1 = process.env.ODDS_API_KEY_1 || '0e31c3149f0afbb009491a0cd80169f4';
+const ODDS_API_KEY_2 = process.env.ODDS_API_KEY_2 || 'e18abd8956512f34027f0ac3f87fbe52';
 
 function getApiKey() {
   const hour = new Date().getHours();
@@ -308,52 +308,36 @@ async function enriquecerConCuotas(eventos) {
     // Ahora cruzar cada evento del grupo con los juegos obtenidos
     for (const evento of eventosGrupo) {
       for (const game of juegos) {
-        const localLimpio = limpiarNombre(evento.local);
-        const visitanteLimpio = limpiarNombre(evento.visitante);
-        const homeLimpio = limpiarNombre(game.home_team || '');
-        const awayLimpio = limpiarNombre(game.away_team || '');
+        const score = calcularPuntuacionSimilitud(evento.local, evento.visitante, game.home_team || '', game.away_team || '', evento.horaInicio, game.commence_time, evento.sport, sportKey);
+        if (score < 0.7) continue;
 
-        if (
-          (homeLimpio.includes(localLimpio) || localLimpio.includes(homeLimpio)) &&
-          (awayLimpio.includes(visitanteLimpio) || visitanteLimpio.includes(awayLimpio))
-        ) {
-          const bookmakers = game.bookmakers?.[0];
-          if (bookmakers?.markets?.[0]?.outcomes) {
-            const outcomes = bookmakers.markets[0].outcomes;
-            // Buscar por nombre real del equipo, no por 'Home'/'Away'
-            const outcomeLocal = outcomes.find(o => limpiarNombre(o.name) === homeLimpio);
-            const outcomeVisitante = outcomes.find(o => limpiarNombre(o.name) === awayLimpio);
-            const outcomeEmpate = outcomes.find(o => o.name.toLowerCase() === 'draw' || o.name.toLowerCase() === 'empate');
-            
-            evento.cuota_local = outcomeLocal ? outcomeLocal.price : evento.cuota_local;
-            console.log(`✅ Cuotas reales para [${evento.local} vs ${evento.visitante}]: L:${evento.cuota_local} | V:${evento.cuota_visitante}`);
-            evento.cuota_visitante = outcomeVisitante ? outcomeVisitante.price : evento.cuota_visitante;
-            if (outcomeEmpate) evento.cuota_empate = outcomeEmpate.price;
-          }
-          break;
+        const bookmakers = game.bookmakers?.[0];
+        if (!bookmakers?.markets?.[0]?.outcomes) continue;
+        const outcomes = bookmakers.markets[0].outcomes;
+
+        const homeApi = limpiarNombre(game.home_team || '');
+        const awayApi = limpiarNombre(game.away_team || '');
+
+        // Determinar si es coincidencia directa o cruzada comparando puntuaciones
+        const scoreDirecto = calcularPuntuacionSimilitud(evento.local, evento.visitante, game.home_team || '', game.away_team || '', evento.horaInicio, game.commence_time, evento.sport, sportKey);
+        const scoreCruzado = calcularPuntuacionSimilitud(evento.local, evento.visitante, game.away_team || '', game.home_team || '', evento.horaInicio, game.commence_time, evento.sport, sportKey);
+        const esCruzado = scoreCruzado > scoreDirecto;
+
+        if (esCruzado) {
+          evento.cuota_local = outcomes.find(o => limpiarNombre(o.name) === awayApi)?.price || evento.cuota_local;
+          evento.cuota_visitante = outcomes.find(o => limpiarNombre(o.name) === homeApi)?.price || evento.cuota_visitante;
+        } else {
+          evento.cuota_local = outcomes.find(o => limpiarNombre(o.name) === homeApi)?.price || evento.cuota_local;
+          evento.cuota_visitante = outcomes.find(o => limpiarNombre(o.name) === awayApi)?.price || evento.cuota_visitante;
         }
-        // Comparación cruzada (API invierte local/visitante)
-        if (
-          (homeLimpio.includes(visitanteLimpio) || visitanteLimpio.includes(homeLimpio)) &&
-          (awayLimpio.includes(localLimpio) || localLimpio.includes(awayLimpio))
-        ) {
-          const bookmakers = game.bookmakers?.[0];
-          if (bookmakers?.markets?.[0]?.outcomes) {
-            const outcomes = bookmakers.markets[0].outcomes;
-            const outcomeLocal = outcomes.find(o => limpiarNombre(o.name) === awayLimpio);
-            const outcomeVisitante = outcomes.find(o => limpiarNombre(o.name) === homeLimpio);
-            const outcomeEmpate = outcomes.find(o => o.name.toLowerCase() === "draw" || o.name.toLowerCase() === "empate");
-            evento.cuota_local = outcomeLocal ? outcomeLocal.price : evento.cuota_local;
-            evento.cuota_visitante = outcomeVisitante ? outcomeVisitante.price : evento.cuota_visitante;
-            if (outcomeEmpate) evento.cuota_empate = outcomeEmpate.price;
-            console.log(`✅ Cuotas reales (cruzada) para [${evento.local} vs ${evento.visitante}]`);
-          }
-          break;
-        }
+        const outcomeEmpate = outcomes.find(o => o.name.toLowerCase() === 'draw');
+        if (outcomeEmpate) evento.cuota_empate = outcomeEmpate.price;
+
+        console.log(`✅ Cuota asignada (score: ${(score*100).toFixed(0)}%, ${esCruzado ? 'cruzada' : 'directa'}) a ${evento.local} vs ${evento.visitante}`);
+        break;
       }
     }
   }
-
   return eventos;
 }
 
