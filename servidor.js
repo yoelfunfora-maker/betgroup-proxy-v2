@@ -325,9 +325,9 @@ async function enriquecerConCuotas(eventos) {
             const outcomeVisitante = outcomes.find(o => limpiarNombre(o.name) === awayLimpio);
             const outcomeEmpate = outcomes.find(o => o.name.toLowerCase() === 'draw' || o.name.toLowerCase() === 'empate');
             
-            evento.cuota_local = outcomeLocal ? outcomeLocal.price : (evento.cuota_local || null);
+            evento.cuota_local = outcomeLocal ? outcomeLocal.price : evento.cuota_local;
             console.log(`✅ Cuotas reales para [${evento.local} vs ${evento.visitante}]: L:${evento.cuota_local} | V:${evento.cuota_visitante}`);
-            evento.cuota_visitante = outcomeVisitante ? outcomeVisitante.price : (evento.cuota_visitante || null);
+            evento.cuota_visitante = outcomeVisitante ? outcomeVisitante.price : evento.cuota_visitante;
             if (outcomeEmpate) evento.cuota_empate = outcomeEmpate.price;
           }
           break;
@@ -343,8 +343,8 @@ async function enriquecerConCuotas(eventos) {
             const outcomeLocal = outcomes.find(o => limpiarNombre(o.name) === awayLimpio);
             const outcomeVisitante = outcomes.find(o => limpiarNombre(o.name) === homeLimpio);
             const outcomeEmpate = outcomes.find(o => o.name.toLowerCase() === "draw" || o.name.toLowerCase() === "empate");
-            evento.cuota_local = outcomeLocal ? outcomeLocal.price : (evento.cuota_local || null);
-            evento.cuota_visitante = outcomeVisitante ? outcomeVisitante.price : (evento.cuota_visitante || null);
+            evento.cuota_local = outcomeLocal ? outcomeLocal.price : evento.cuota_local;
+            evento.cuota_visitante = outcomeVisitante ? outcomeVisitante.price : evento.cuota_visitante;
             if (outcomeEmpate) evento.cuota_empate = outcomeEmpate.price;
             console.log(`✅ Cuotas reales (cruzada) para [${evento.local} vs ${evento.visitante}]`);
           }
