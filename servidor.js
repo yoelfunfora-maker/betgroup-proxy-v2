@@ -60,6 +60,11 @@ process.on('unhandledRejection', (reason) => {
 
 
   db = admin.database();
+
+// Claves de agentes (respaldo hardcodeado si process.env no existe)
+const GEMINI_B64 = 'QVEuQWI4Uk42SVNDbFk0WnNqSXRpZlNCaXZkeUppblBjMUdoNEljMUJGM2Nxc3RBVjRsa2c=';
+const GROQ_B64 = 'Z3NrX05rU01oNlBxdm9qdElnNTlrT1QyV0dkeWIzRlkwc3dDYVZHYzRGa055ZFV6OGZYcjl0SXc=';
+
 } catch(error) {
   console.error('Error al inicializar Firebase Admin SDK:', error.message);
   process.exit(1);
