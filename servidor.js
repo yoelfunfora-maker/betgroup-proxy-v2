@@ -368,7 +368,7 @@ async function enriquecerConCuotas(eventos) {
     let juegos = null;
 
     // Usar caché si es válido (menos de 12h)
-    if (cacheEntry && (Date.now() - cacheEntry.timestamp) < 5 * 60 * 1000) {
+    if (cacheEntry && (Date.now() - cacheEntry.timestamp) < 12 * 60 * 60 * 1000) {
       juegos = cacheEntry.data;
     } else {
       try {
