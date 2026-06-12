@@ -82,11 +82,7 @@ const ODDS_API_KEY_2 = process.env.ODDS_API_KEY_2 || '';
 
 function getApiKey() {
   const hour = new Date().getHours();
-  // Claves por defecto siempre disponibles
-  if (hour === 0 || hour === 8)  return 'e18abd8956512f34027f0ac3f87fbe52';
-  if (hour === 14 || hour === 18) return '0e31c3149f0afbb009491a0cd80169f4';
-  // Fuera de horario: devolver la clave más reciente para no parar el sistema
-  return '0e31c3149f0afbb009491a0cd80169f4';
+  return hour < 12 ? ODDS_API_KEY_1 : ODDS_API_KEY_2;
 }
 
 // ==================== ESPN FETCH ====================
@@ -167,19 +163,10 @@ function parseEvents(espnData, sport) {
       }
 
       const getName = (c) => {
-        const name = c?.athlete?.displayName || c?.team?.displayName || 'Desconocido';
-        // Si el nombre es TBD o null, devolver null para filtrar el evento
-        if (!name || name === 'TBD' || name === 'None') return null;
-        return name;
+        return c?.athlete?.displayName || c?.team?.displayName || 'Desconocido';
       };
       
-      const getLogo = (c) => {
-    // Deportes de equipo: usar logo del equipo
-    if (c?.team?.logo) return c.team.logo;
-    // Deportes individuales: usar foto del atleta
-    if (c?.athlete?.headshot) return c.athlete.headshot;
-    return null;
-  };
+      const getLogo = (c) => c?.team?.logo || null;
 
       const status = competitionStatus || ev.status?.type;
       if (!status) continue;
@@ -190,10 +177,6 @@ function parseEvents(espnData, sport) {
 
       const homeScore = home.score || '0';
       const awayScore = away.score || '0';
-
-            const nombreLocal = getName(home);
-      const nombreVisitante = getName(away);
-      if (!nombreLocal || !nombreVisitante) continue; // Saltar eventos TBD
 
       events.push({
         id: ev.id,
@@ -226,25 +209,134 @@ function parseEvents(espnData, sport) {
 
 // ==================== ENRIQUECER CON CUOTAS ====================
 
-function limpiarNombre(nombre) {
-  if (!nombre) return '';
-  return nombre
-    .toLowerCase()
-    .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
-    .replace(/\b(ny|n\.y\.)\b/g, 'new york')
-    .replace(/\b(la|l\.a\.)\b/g, 'los angeles')
-    .replace(/[^a-z0-9ñ ]/g, ' ')
-    .replace(/\s+/g, ' ')
-    .trim();
-}
+
 
 
 // Cache de cuotas por sportKey (12h de vida)
 const oddsCache = {};
 
 
+// ==================== RASTREADOR ATHOS (TAVILY) ====================
+const TAVILY_API_KEY = process.env.TAVILY_API_KEY || '';
+
+async function enriquecerConAthos(eventos) {
+  if (!TAVILY_API_KEY) {
+    console.warn('⚠️ Sin TAVILY_API_KEY - no se pueden buscar cuotas');
+    return eventos;
+  }
+
+  for (const evento of eventos) {
+    // Solo buscar si no tiene cuotas reales aún
+    if (evento.cuota_local > 1.0 && evento.cuota_visitante > 1.0) continue;
+
+    const query = `cuotas apuestas ${evento.local} vs ${evento.visitante} ${evento.liga} ${evento.sport} oddschecker flashscore`;
+    
+    try {
+      const response = await axios.post('https://api.tavily.com/search', {
+        api_key: TAVILY_API_KEY,
+        query: query,
+        search_depth: 'advanced',
+        max_results: 5
+      }, { timeout: 10000 });
+
+      // Extraer cuotas de los resultados (parsing simple)
+      const cuotas = extraerCuotas(response.data?.results || [], evento);
+      if (cuotas) {
+        evento.cuota_local = cuotas.local;
+        evento.cuota_visitante = cuotas.visitante;
+        evento.cuota_empate = cuotas.empate || 3.5;
+      }
+    } catch(err) {
+      console.error(`Athos error para ${evento.local}:`, err.message);
+    }
+  }
+  return eventos;
+}
+
+function extraerCuotas(results, evento) {
+  // Buscar patrones de cuotas en los snippets (números con decimales)
+  const patron = /(\d+\.\d{2})/g;
+  let todas = [];
+  
+  for (const r of results) {
+    const matches = r.content?.match(patron) || [];
+    todas = todas.concat(matches.map(Number));
+  }
+  
+  if (todas.length >= 2) {
+    // Asumir que las dos primeras son local y visitante
+    return { local: todas[0], visitante: todas[1] };
+  }
+  return null;
+}
+// ==================== FIN ATHOS ====================
 
 
+
+// ==================== MOTOR MULTI-CRITERIO ====================
+function normalizarNombre(nombre) {
+  if (!nombre) return '';
+  return nombre
+    .toLowerCase()
+    .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^a-z0-9ñ ]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function similitudNombres(nombre1, nombre2) {
+  const tok1 = normalizarNombre(nombre1).split(' ').filter(t => t.length > 1);
+  const tok2 = normalizarNombre(nombre2).split(' ').filter(t => t.length > 1);
+  if (!tok1.length || !tok2.length) return 0;
+  const interseccion = tok1.filter(t => tok2.includes(t)).length;
+  return interseccion / Math.max(tok1.length, tok2.length);
+}
+
+function similitudLiga(ligaESPN, sportKey) {
+  const sportMap = {
+    'basketball_nba': 'nba',
+    'baseball_mlb': 'mlb',
+    'mma_mixed_martial_arts': 'ufc',
+    'tennis_atp': 'atp',
+    'soccer_epl': 'premier league',
+    'soccer_fifa_world_cup': 'world cup',
+    'soccer_international_friendly': 'friendly'
+  };
+  const expected = sportMap[sportKey] || '';
+  const liga = (ligaESPN || '').toLowerCase();
+  if (!expected) return 0.5;
+  return liga.includes(expected) ? 1.0 : 0.3;
+}
+
+function scoreCoincidencia(evento, game, sportKey) {
+  const horaESPN = evento.horaInicio ? new Date(evento.horaInicio).getTime() : 0;
+  const horaAPI = game.commence_time ? new Date(game.commence_time).getTime() : 0;
+  let scoreTiempo = 0;
+  if (horaESPN && horaAPI) {
+    const diff = Math.abs(horaESPN - horaAPI);
+    if (diff < 2 * 60 * 60 * 1000) scoreTiempo = 1.0;
+    else if (diff < 24 * 60 * 60 * 1000) scoreTiempo = 0.5;
+    else scoreTiempo = 0.2;
+  } else {
+    scoreTiempo = 0.5;
+  }
+
+  const scoreLiga = similitudLiga(evento.liga, sportKey);
+
+  const scoreDirecto = Math.min(
+    similitudNombres(evento.local, game.home_team || ''),
+    similitudNombres(evento.visitante, game.away_team || '')
+  );
+  const scoreCruzado = Math.min(
+    similitudNombres(evento.local, game.away_team || ''),
+    similitudNombres(evento.visitante, game.home_team || '')
+  );
+  const scoreNombres = Math.max(scoreDirecto, scoreCruzado);
+
+  const final = scoreTiempo * 0.4 + scoreLiga * 0.3 + scoreNombres * 0.3;
+  return { score: final, esCruzado: scoreCruzado > scoreDirecto };
+}
+// ==================== FIN MOTOR MULTI-CRITERIO ====================
 
 async function enriquecerConCuotas(eventos) {
   const apiKey = getApiKey();
@@ -254,24 +346,16 @@ async function enriquecerConCuotas(eventos) {
   }
 
   const sportKeyMap = {
-    'soccer': (liga) => {
-    const l = (liga || '').toLowerCase();
-    if (l.includes('world') || l.includes('copa') || l.includes('fifa')) return 'soccer_fifa_world_cup';
-    if (l.includes('friendly') || l.includes('amistoso')) return 'soccer_international_friendly';
-    return 'soccer_epl';
-  },
+    'soccer': 'soccer_epl',
     'basketball': 'basketball_nba',
     'baseball': 'baseball_mlb',
-    'mma': 'mma_mixed_martial_arts',
-    'tennis': 'tennis_atp'
+    'mma': 'mma_mixed_martial_arts'
   };
 
   // Agrupar eventos por sportKey
   const grupos = {};
   for (const evento of eventos) {
-    const sportKey = typeof sportKeyMap[evento.sport] === 'function' 
-      ? sportKeyMap[evento.sport](evento.liga) 
-      : sportKeyMap[evento.sport];
+    const sportKey = sportKeyMap[evento.sport];
     if (!sportKey) continue;
     if (!grupos[sportKey]) grupos[sportKey] = [];
     grupos[sportKey].push(evento);
@@ -283,14 +367,10 @@ async function enriquecerConCuotas(eventos) {
     let juegos = null;
 
     // Usar caché si es válido (menos de 12h)
-    if (cacheEntry && (Date.now() - cacheEntry.timestamp) < 5 * 60 * 1000) {
+    if (cacheEntry && (Date.now() - cacheEntry.timestamp) < 12 * 60 * 60 * 1000) {
       juegos = cacheEntry.data;
     } else {
       try {
-        console.log(`📡 Consultando The Odds API para: ${sportKey}...`);
-      if (sportKey === 'mma_mixed_martial_arts') {
-        console.log('🔍 MMA: Buscando cuotas para eventos de artes marciales mixtas');
-      }
         const url = `https://api.the-odds-api.com/v4/sports/${sportKey}/odds?apiKey=${apiKey}&markets=h2h&regions=us`;
         const response = await axios.get(url, { timeout: 5000 });
         if (response.data) {
@@ -308,35 +388,41 @@ async function enriquecerConCuotas(eventos) {
     // Ahora cruzar cada evento del grupo con los juegos obtenidos
     for (const evento of eventosGrupo) {
       for (const game of juegos) {
-        const localLimpio = limpiarNombre(evento.local);
-        const visitanteLimpio = limpiarNombre(evento.visitante);
-        const homeLimpio = limpiarNombre(game.home_team || '');
-        const awayLimpio = limpiarNombre(game.away_team || '');
+        const { score, esCruzado } = scoreCoincidencia(evento, game, sportKey);
+        if (score < 0.75) continue;
 
-        if (
-          (homeLimpio.includes(localLimpio) || localLimpio.includes(homeLimpio)) &&
-          (awayLimpio.includes(visitanteLimpio) || visitanteLimpio.includes(awayLimpio))
-        ) {
-          const bookmakers = game.bookmakers?.[0];
-          if (bookmakers?.markets?.[0]?.outcomes) {
-            const outcomes = bookmakers.markets[0].outcomes;
-            // Buscar por nombre real del equipo, no por 'Home'/'Away'
-            const outcomeLocal = outcomes.find(o => limpiarNombre(o.name) === homeLimpio);
-            const outcomeVisitante = outcomes.find(o => limpiarNombre(o.name) === awayLimpio);
-            const outcomeEmpate = outcomes.find(o => o.name.toLowerCase() === 'draw' || o.name.toLowerCase() === 'empate');
-            
-            evento.cuota_local = outcomeLocal ? outcomeLocal.price : evento.cuota_local;
-            console.log(`✅ Cuotas reales para [${evento.local} vs ${evento.visitante}]: L:${evento.cuota_local} | V:${evento.cuota_visitante}`);
-            evento.cuota_visitante = outcomeVisitante ? outcomeVisitante.price : evento.cuota_visitante;
-            if (outcomeEmpate) evento.cuota_empate = outcomeEmpate.price;
-          }
-          break;
+        const bookmakers = game.bookmakers?.[0];
+        if (!bookmakers?.markets?.[0]?.outcomes) continue;
+        const outcomes = bookmakers.markets[0].outcomes;
+
+        const homeApi = normalizarNombre(game.home_team || '');
+        const awayApi = normalizarNombre(game.away_team || '');
+
+        if (esCruzado) {
+          const outcomeLocal = outcomes.find(o => normalizarNombre(o.name) === awayApi);
+          const outcomeVisitante = outcomes.find(o => normalizarNombre(o.name) === homeApi);
+          evento.cuota_local = outcomeLocal ? outcomeLocal.price : evento.cuota_local;
+          evento.cuota_visitante = outcomeVisitante ? outcomeVisitante.price : evento.cuota_visitante;
+        } else {
+          const outcomeLocal = outcomes.find(o => normalizarNombre(o.name) === homeApi);
+          const outcomeVisitante = outcomes.find(o => normalizarNombre(o.name) === awayApi);
+          evento.cuota_local = outcomeLocal ? outcomeLocal.price : evento.cuota_local;
+          evento.cuota_visitante = outcomeVisitante ? outcomeVisitante.price : evento.cuota_visitante;
         }
+        const outcomeEmpate = outcomes.find(o => o.name.toLowerCase() === 'draw');
+        if (outcomeEmpate) evento.cuota_empate = outcomeEmpate.price;
+
+        console.log(`✅ Cuota asignada a ${evento.local} vs ${evento.visitante} (score: ${(score*100).toFixed(0)}%, ${esCruzado ? 'cruzada' : 'directa'})`);
+        break;
+      }
+      if (!evento.cuota_local || evento.cuota_local <= 1.0) {
+        console.warn(`⚠️ Sin cuota para ${evento.local} vs ${evento.visitante} (score insuficiente)`);
       }
     }
   }
 
   return eventos;
+return eventos;
 }
 
 
@@ -371,7 +457,7 @@ async function precalentarCache() {
   const sinCuotas = allEvents.filter(e => !e.cuota_local || e.cuota_local <= 1.0);
   if (sinCuotas.length > 0) {
     console.log(`Athos buscando cuotas para ${sinCuotas.length} eventos...`);
-    // Athos eliminado - el sistema usa solo The Odds API
+    await enriquecerConAthos(allEvents);
   }
 
   const response = {
