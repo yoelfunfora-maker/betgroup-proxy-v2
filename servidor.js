@@ -42,7 +42,7 @@ async function enviarAlertaTelegram(texto) {
     await axios.post('https://api.telegram.org/bot8671464180:AAHhu_Ct9-3Q6Arjle-7Xy4DyUGuuNvraBs/sendMessage', {
       chat_id: '-5154764705',
       text: texto,
-      parse_mode: 'HTML'
+      parse_mode: 'Markdown'
     }, { timeout: 5000 });
   } catch(e) { console.error('Error al enviar Telegram:', e.message); }
 }
@@ -698,7 +698,7 @@ async function notificarTelegram(texto) {
     await axios.post('https://api.telegram.org/bot8671464180:AAHhu_Ct9-3Q6Arjle-7Xy4DyUGuuNvraBs/sendMessage', {
       chat_id: '-5154764705',
       text: texto,
-      parse_mode: 'HTML'
+      parse_mode: 'Markdown'
     }, { timeout: 5000 });
   } catch(e) { console.error('Error notificando a Telegram:', e.message); }
 }
@@ -739,7 +739,7 @@ app.get('/api/verificacion-geminis', async (req, res) => {
     await axios.post('https://api.telegram.org/bot8671464180:AAHhu_Ct9-3Q6Arjle-7Xy4DyUGuuNvraBs/sendMessage', {
       chat_id: '-5154764705',
       text: '📊 <b>INFORME DE GEMINIS02</b>\n\n' + informe,
-      parse_mode: 'HTML'
+      parse_mode: 'Markdown'
     }, { timeout: 5000 });
 
     res.json({ success: true, estado, informe });
@@ -937,7 +937,7 @@ Máximo 800 palabras.`;
       await axios.post('https://api.telegram.org/bot8671464180:AAHhu_Ct9-3Q6Arjle-7Xy4DyUGuuNvraBs/sendMessage', {
         chat_id: '-5154764705',
         text: informe,
-        parse_mode: 'HTML'
+        parse_mode: 'Markdown'
       }, { timeout: 10000 });
       console.log('✅ Informe diario enviado a Telegram');
     }
