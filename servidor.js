@@ -208,9 +208,20 @@ function parseEvents(espnData, sport) {
         minuto: ev.status?.displayClock || null,
         estado: isLive ? 'live' : 'scheduled',
         horaInicio: ev.date || null,
+        // ========== MONEYLINE (H2H) ==========
         cuota_local: null,
         cuota_empate: null,
-        cuota_visitante: null
+        cuota_visitante: null,
+        // ========== HANDICAP (SPREADS) ==========
+        handicap_local: null,           // punto del handicap local
+        handicap_local_cuota: null,     // cuota del handicap local
+        handicap_visitante: null,       // punto del handicap visitante
+        handicap_visitante_cuota: null, // cuota del handicap visitante
+        // ========== TOTALES (TOTALS) ==========
+        total_over_point: null,         // punto del over (ej: 2.5)
+        total_over_price: null,         // cuota del over
+        total_under_point: null,        // punto del under (ej: 2.5)
+        total_under_price: null         // cuota del under
       });
     } catch(e) { 
       /* evento inválido */ 
@@ -226,18 +237,106 @@ function parseEvents(espnData, sport) {
 
 // ==================== ENRIQUECER CON CUOTAS ====================
 
-function limpiarNombre(nombre) {
+// ==================== SIMILITUD Y NORMALIZACIÓN ====================
+
+function normalizarNombre(nombre) {
   if (!nombre) return '';
+  
   return nombre
     .toLowerCase()
+<<<<<<< HEAD
     .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
     .replace(/^ny\b|\bny$/g, 'new york')
     .replace(/^la\b|\bla$/g, 'los angeles')
     .replace(/^st\b|\bst\.?$/g, 'saint')
     .replace(/\b(fc|cf|sc|ac|united|city|club|deportivo|real|san|los|las|the|of)\b/g, '')
+=======
+    .normalize('NFD').replace(/[\u0300-\u036f]/g, '') // tildes
+    .replace(/\b(ny|n\.y\.)\b/g, 'new york')
+    .replace(/\b(la|l\.a\.)\b/g, 'los angeles')
+>>>>>>> 1d4c54d (🚀 [PROTOCOLO V9.0] ACTIVADO - Mercados múltiples (h2h, spreads, totals))
     .replace(/[^a-z0-9ñ ]/g, ' ')
     .replace(/\s+/g, ' ')
     .trim();
+}
+
+// Alias para compatibilidad
+function limpiarNombre(nombre) {
+  return normalizarNombre(nombre);
+}
+
+// ==================== SIMILITUD DE JACCARD ====================
+function jaccardSimilarity(str1, str2) {
+  const tokens1 = new Set(str1.split(' ').filter(t => t.length > 1));
+  const tokens2 = new Set(str2.split(' ').filter(t => t.length > 1));
+  
+  if (tokens1.size === 0 && tokens2.size === 0) return 1.0;
+  if (tokens1.size === 0 || tokens2.size === 0) return 0.0;
+  
+  const interseccion = new Set([...tokens1].filter(x => tokens2.has(x)));
+  const union = new Set([...tokens1, ...tokens2]);
+  
+  return interseccion.size / union.size;
+}
+
+// ==================== DISTANCIA DE LEVENSHTEIN ====================
+function levenshteinDistance(s1, s2) {
+  const len1 = s1.length;
+  const len2 = s2.length;
+  const d = Array(len2 + 1).fill(0).map(() => Array(len1 + 1).fill(0));
+  
+  for (let i = 0; i <= len1; i++) d[0][i] = i;
+  for (let j = 0; j <= len2; j++) d[j][0] = j;
+  
+  for (let j = 1; j <= len2; j++) {
+    for (let i = 1; i <= len1; i++) {
+      const cost = s1[i - 1] === s2[j - 1] ? 0 : 1;
+      d[j][i] = Math.min(
+        d[j][i - 1] + 1,
+        d[j - 1][i] + 1,
+        d[j - 1][i - 1] + cost
+      );
+    }
+  }
+  
+  return d[len2][len1];
+}
+
+function levenshteinSimilarity(s1, s2) {
+  const maxLen = Math.max(s1.length, s2.length);
+  if (maxLen === 0) return 1.0;
+  return 1 - (levenshteinDistance(s1, s2) / maxLen);
+}
+
+// ==================== PUNTUACIÓN DE SIMILITUD MULTI-CRITERIO ====================
+function calcularPuntuacionSimilitud(evento, game) {
+  const localNorm = normalizarNombre(evento.local);
+  const visitanteNorm = normalizarNombre(evento.visitante);
+  const homeNorm = normalizarNombre(game.home_team || '');
+  const awayNorm = normalizarNombre(game.away_team || '');
+  
+  // COINCIDENCIA DIRECTA: local = home, visitante = away
+  const jaccardHome = jaccardSimilarity(localNorm, homeNorm);
+  const jaccardAway = jaccardSimilarity(visitanteNorm, awayNorm);
+  const levenHome = levenshteinSimilarity(localNorm, homeNorm);
+  const levenAway = levenshteinSimilarity(visitanteNorm, awayNorm);
+  
+  const puntuacionDirecta = (jaccardHome * 0.4 + levenHome * 0.35) + (jaccardAway * 0.4 + levenAway * 0.35);
+  
+  // COINCIDENCIA CRUZADA: local = away, visitante = home
+  const jaccardHomeX = jaccardSimilarity(localNorm, awayNorm);
+  const jaccardAwayX = jaccardSimilarity(visitanteNorm, homeNorm);
+  const levenHomeX = levenshteinSimilarity(localNorm, awayNorm);
+  const levenAwayX = levenshteinSimilarity(visitanteNorm, homeNorm);
+  
+  const puntuacionCruzada = (jaccardHomeX * 0.4 + levenHomeX * 0.35) + (jaccardAwayX * 0.4 + levenAwayX * 0.35);
+  
+  return {
+    directa: puntuacionDirecta,
+    cruzada: puntuacionCruzada,
+    mejor: Math.max(puntuacionDirecta, puntuacionCruzada),
+    tipo: puntuacionDirecta > puntuacionCruzada ? 'directa' : 'cruzada'
+  };
 }
 
 
@@ -364,34 +463,41 @@ async function enriquecerConCuotas(eventos) {
 
   // Procesar cada grupo
   for (const [sportKey, eventosGrupo] of Object.entries(grupos)) {
-    const cacheEntry = oddsCache[sportKey];
+    const cacheKey = `odds_${sportKey}`;
+    const cacheEntry = oddsCache[cacheKey];
     let juegos = null;
 
+<<<<<<< HEAD
     // Usar caché si es válido (menos de 12h)
     if (cacheEntry && (Date.now() - cacheEntry.timestamp) < 12 * 60 * 60 * 1000) {
+=======
+    // Usar caché si es válido (menos de 5 minutos)
+    if (cacheEntry && (Date.now() - cacheEntry.timestamp) < 5 * 60 * 1000) {
+>>>>>>> 1d4c54d (🚀 [PROTOCOLO V9.0] ACTIVADO - Mercados múltiples (h2h, spreads, totals))
       juegos = cacheEntry.data;
     } else {
       try {
-        console.log(`📡 Consultando The Odds API para: ${sportKey}...`);
-      if (sportKey === 'mma_mixed_martial_arts') {
-        console.log('🔍 MMA: Buscando cuotas para eventos de artes marciales mixtas');
-      }
-        const url = `https://api.the-odds-api.com/v4/sports/${sportKey}/odds?apiKey=${apiKey}&markets=h2h&regions=us`;
+        console.log(`📡 Consultando The Odds API para: ${sportKey} (h2h, spreads, totals)...`);
+        
+        // CAMBIO CLAVE: markets=h2h,spreads,totals
+        const url = `https://api.the-odds-api.com/v4/sports/${sportKey}/odds?apiKey=${apiKey}&markets=h2h,spreads,totals&regions=us`;
         const response = await axios.get(url, { timeout: 5000 });
         if (response.data) {
-          juegos = response.data.data || response.data; // la API a veces devuelve {data: [...]}
-          oddsCache[sportKey] = { data: juegos, timestamp: Date.now() };
+          juegos = response.data.data || response.data;
+          oddsCache[cacheKey] = { data: juegos, timestamp: Date.now() };
+          console.log(`✅ Obtenidas cuotas para ${juegos.length} eventos de ${sportKey}`);
         }
       } catch(err) {
-        console.error(`Error cuotas para ${sportKey}:`, err.message);
-        continue; // seguir con el siguiente deporte
+        console.error(`❌ Error consultando cuotas para ${sportKey}:`, err.message);
+        continue;
       }
     }
 
     if (!juegos) continue;
 
-    // Ahora cruzar cada evento del grupo con los juegos obtenidos
+    // Procesar cada evento con TODOS los mercados
     for (const evento of eventosGrupo) {
+<<<<<<< HEAD
       for (const game of juegos) {
         const { score, esCruzado } = coincideEquipo(evento, game);
         if (score < 0.82) continue;
@@ -415,6 +521,119 @@ async function enriquecerConCuotas(eventos) {
 
         console.log(`✅ Cuota asignada (score: ${(score*100).toFixed(0)}%, ${esCruzado ? 'cruzada' : 'directa'}) a ${evento.local} vs ${evento.visitante}`);
         break;
+=======
+      let mejorCoincidencia = null;
+      let mejorPuntuacion = 0;
+      const UMBRAL_MINIMO = 0.70;
+
+      for (const game of juegos) {
+        const puntuacion = calcularPuntuacionSimilitud(evento, game);
+        
+        if (puntuacion.mejor > mejorPuntuacion && puntuacion.mejor >= UMBRAL_MINIMO) {
+          mejorPuntuacion = puntuacion.mejor;
+          mejorCoincidencia = {
+            game: game,
+            tipo: puntuacion.tipo,
+            puntuacion: puntuacion.mejor
+          };
+        }
+      }
+
+      if (mejorCoincidencia) {
+        const game = mejorCoincidencia.game;
+        const bookmakers = game.bookmakers?.[0];
+        
+        if (bookmakers && bookmakers.markets) {
+          // ================== PROCESAR CADA MERCADO ==================
+          
+          for (const market of bookmakers.markets) {
+            if (!market.outcomes) continue;
+
+            // ========== MERCADO H2H (MONEYLINE) ==========
+            if (market.key === 'h2h') {
+              const outcomes = market.outcomes;
+              
+              if (mejorCoincidencia.tipo === 'directa') {
+                const homeOutcome = outcomes.find(o => o.name === 'Home');
+                const awayOutcome = outcomes.find(o => o.name === 'Away');
+                const drawOutcome = outcomes.find(o => o.name === 'Draw');
+                
+                if (homeOutcome) evento.cuota_local = homeOutcome.price;
+                if (awayOutcome) evento.cuota_visitante = awayOutcome.price;
+                if (drawOutcome) evento.cuota_empate = drawOutcome.price;
+              } else {
+                // CRUZADO: local es away, visitante es home
+                const homeOutcome = outcomes.find(o => o.name === 'Home');
+                const awayOutcome = outcomes.find(o => o.name === 'Away');
+                const drawOutcome = outcomes.find(o => o.name === 'Draw');
+                
+                if (homeOutcome) evento.cuota_visitante = homeOutcome.price;
+                if (awayOutcome) evento.cuota_local = awayOutcome.price;
+                if (drawOutcome) evento.cuota_empate = drawOutcome.price;
+              }
+              
+              console.log(`✅ H2H [${evento.local} vs ${evento.visitante}]: ${evento.cuota_local} | ${evento.cuota_visitante}`);
+            }
+            
+            // ========== MERCADO SPREADS (HANDICAP) ==========
+            if (market.key === 'spreads') {
+              const outcomes = market.outcomes;
+              
+              if (mejorCoincidencia.tipo === 'directa') {
+                const homeSpread = outcomes.find(o => o.name === 'Home');
+                const awaySpread = outcomes.find(o => o.name === 'Away');
+                
+                if (homeSpread) {
+                  evento.handicap_local = homeSpread.point;
+                  evento.handicap_local_cuota = homeSpread.price;
+                }
+                if (awaySpread) {
+                  evento.handicap_visitante = awaySpread.point;
+                  evento.handicap_visitante_cuota = awaySpread.price;
+                }
+              } else {
+                // CRUZADO
+                const homeSpread = outcomes.find(o => o.name === 'Home');
+                const awaySpread = outcomes.find(o => o.name === 'Away');
+                
+                if (homeSpread) {
+                  evento.handicap_visitante = homeSpread.point;
+                  evento.handicap_visitante_cuota = homeSpread.price;
+                }
+                if (awaySpread) {
+                  evento.handicap_local = awaySpread.point;
+                  evento.handicap_local_cuota = awaySpread.price;
+                }
+              }
+              
+              console.log(`✅ SPREADS [${evento.local} vs ${evento.visitante}]: L(${evento.handicap_local}@${evento.handicap_local_cuota}) | V(${evento.handicap_visitante}@${evento.handicap_visitante_cuota})`);
+            }
+            
+            // ========== MERCADO TOTALS (OVER/UNDER) ==========
+            if (market.key === 'totals') {
+              const outcomes = market.outcomes;
+              
+              const overOutcome = outcomes.find(o => o.name === 'Over');
+              const underOutcome = outcomes.find(o => o.name === 'Under');
+              
+              if (overOutcome) {
+                evento.total_over_point = overOutcome.point;
+                evento.total_over_price = overOutcome.price;
+              }
+              if (underOutcome) {
+                evento.total_under_point = underOutcome.point;
+                evento.total_under_price = underOutcome.price;
+              }
+              
+              console.log(`✅ TOTALS [${evento.local} vs ${evento.visitante}]: O(${evento.total_over_point}@${evento.total_over_price}) | U(${evento.total_under_point}@${evento.total_under_price})`);
+            }
+          }
+          
+          console.log(`✨ Evento completo [${evento.local} vs ${evento.visitante}] con ${Object.keys(evento).filter(k => evento[k] !== null && k.includes('cuota') || k.includes('handicap') || k.includes('total')).length} mercados`);
+        }
+      } else {
+        console.warn(`⚠️ Sin coincidencia > ${UMBRAL_MINIMO * 100}% para: ${evento.local} vs ${evento.visitante}`);
+>>>>>>> 1d4c54d (🚀 [PROTOCOLO V9.0] ACTIVADO - Mercados múltiples (h2h, spreads, totals))
       }
     }
   }
@@ -487,27 +706,66 @@ app.get('/api/health', (req, res) => {
   });
 });
 
+// 🔥 RUTA /api/fixtures - DEVUELVE CUOTAS REALES DE TODOS LOS DEPORTES
 app.get('/api/fixtures', async (req, res) => {
   try {
     const cached = getCache('fixtures');
-    if (cached) {
+    if (cached && cached.data && cached.data.length > 0) {
       return res.json(cached);
     }
 
+    console.log('🔄 Cargando cuotas en vivo...');
+    const allEvents = [];
+    const sports = ['soccer', 'basketball', 'baseball', 'tennis', 'mma'];
+    
+    for (const sport of sports) {
+      try {
+        const apiKey = getApiKey();
+        const url = `https://api.the-odds-api.com/v4/sports/${sport}/odds?apiKey=${apiKey}&markets=h2h,spreads,totals&regions=us`;
+        const { data: oddsData } = await axios.get(url, { timeout: 8000 });
+        
+        if (oddsData && oddsData.data) {
+          const parsed = oddsData.data.map(ev => ({
+            local: ev.home_team || ev.home_player || 'TBD',
+            visitante: ev.away_team || ev.away_player || 'TBD',
+            sport: sport,
+            evento_id: ev.id,
+            estado: new Date(ev.commence_time) > new Date() ? 'proximo' : 'en_vivo',
+            cuota_local: ev.bookmakers?.[0]?.markets?.find(m => m.key === 'h2h')?.outcomes?.[0]?.price,
+            cuota_empate: sport === 'soccer' ? ev.bookmakers?.[0]?.markets?.find(m => m.key === 'h2h')?.outcomes?.find(o => o.name === 'Draw')?.price : null,
+            cuota_visitante: ev.bookmakers?.[0]?.markets?.find(m => m.key === 'h2h')?.outcomes?.[1]?.price,
+            handicap_local: ev.bookmakers?.[0]?.markets?.find(m => m.key === 'spreads')?.outcomes?.[0]?.point,
+            handicap_local_cuota: ev.bookmakers?.[0]?.markets?.find(m => m.key === 'spreads')?.outcomes?.[0]?.price,
+            handicap_visitante: ev.bookmakers?.[0]?.markets?.find(m => m.key === 'spreads')?.outcomes?.[1]?.point,
+            handicap_visitante_cuota: ev.bookmakers?.[0]?.markets?.find(m => m.key === 'spreads')?.outcomes?.[1]?.price,
+            total_over_point: sport !== 'mma' ? ev.bookmakers?.[0]?.markets?.find(m => m.key === 'totals')?.outcomes?.find(o => o.name === 'Over')?.point : null,
+            total_over_price: sport !== 'mma' ? ev.bookmakers?.[0]?.markets?.find(m => m.key === 'totals')?.outcomes?.find(o => o.name === 'Over')?.price : null,
+            total_under_point: sport !== 'mma' ? ev.bookmakers?.[0]?.markets?.find(m => m.key === 'totals')?.outcomes?.find(o => o.name === 'Under')?.point : null,
+            total_under_price: sport !== 'mma' ? ev.bookmakers?.[0]?.markets?.find(m => m.key === 'totals')?.outcomes?.find(o => o.name === 'Under')?.price : null
+          })).filter(e => e.cuota_local || e.cuota_visitante);
+          
+          allEvents.push(...parsed);
+          console.log(`  ✅ ${sport}: ${parsed.length} eventos`);
+        }
+      } catch (err) {
+        console.log(`  ⚠️ ${sport}: ${err.message}`);
+      }
+    }
+    
     const response = {
-      status: 'loading',
-      total: 0,
-      en_vivo: 0,
-      proximos: 0,
-      data: []
+      status: allEvents.length > 0 ? 'success' : 'no_data',
+      total: allEvents.length,
+      en_vivo: allEvents.filter(e => e.estado === 'en_vivo').length,
+      proximos: allEvents.filter(e => e.estado === 'proximo').length,
+      data: allEvents
     };
     
+    setCache('fixtures', response, 300);
+    console.log(`✅ /api/fixtures: ${allEvents.length} eventos`);
     res.json(response);
-
-    await precalentarCache();
   } catch(err) {
-    console.error('Error /api/fixtures:', err);
-    res.status(500).json({ error: err.message });
+    console.error('❌ /api/fixtures:', err);
+    res.status(500).json({ error: err.message, data: [] });
   }
 });
 
