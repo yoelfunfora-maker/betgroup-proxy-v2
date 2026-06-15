@@ -244,17 +244,9 @@ function normalizarNombre(nombre) {
   
   return nombre
     .toLowerCase()
-<<<<<<< HEAD
-    .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
-    .replace(/^ny\b|\bny$/g, 'new york')
-    .replace(/^la\b|\bla$/g, 'los angeles')
-    .replace(/^st\b|\bst\.?$/g, 'saint')
-    .replace(/\b(fc|cf|sc|ac|united|city|club|deportivo|real|san|los|las|the|of)\b/g, '')
-=======
     .normalize('NFD').replace(/[\u0300-\u036f]/g, '') // tildes
     .replace(/\b(ny|n\.y\.)\b/g, 'new york')
     .replace(/\b(la|l\.a\.)\b/g, 'los angeles')
->>>>>>> 1d4c54d (🚀 [PROTOCOLO V9.0] ACTIVADO - Mercados múltiples (h2h, spreads, totals))
     .replace(/[^a-z0-9ñ ]/g, ' ')
     .replace(/\s+/g, ' ')
     .trim();
@@ -347,89 +339,6 @@ const oddsCache = {};
 
 
 
-
-// ==================== FUNCIONES DE SIMILITUD AVANZADAS ====================
-function bigramas(str) {
-  const s = str.toLowerCase();
-  const bigrams = [];
-  for (let i = 0; i < s.length - 1; i++) {
-    bigrams.push(s.substring(i, i + 2));
-  }
-  return new Set(bigrams);
-}
-
-function sorensenDice(str1, str2) {
-  const bigrams1 = bigramas(str1);
-  const bigrams2 = bigramas(str2);
-  const intersection = new Set([...bigrams1].filter(x => bigrams2.has(x)));
-  return (2 * intersection.size) / (bigrams1.size + bigrams2.size);
-}
-
-function jaccardTokens(str1, str2) {
-  const tokens1 = new Set(str1.split(' ').filter(t => t.length > 1));
-  const tokens2 = new Set(str2.split(' ').filter(t => t.length > 1));
-  const intersection = new Set([...tokens1].filter(x => tokens2.has(x)));
-  const union = new Set([...tokens1, ...tokens2]);
-  return union.size === 0 ? 0 : intersection.size / union.size;
-}
-
-// Resolución de países por código ISO (sin diccionarios)
-function tieneCodigoISO(nombre) {
-  const isoMap = {
-    'czechia': 'CZE', 'czech republic': 'CZE',
-    'south korea': 'KOR', 'korea republic': 'KOR',
-    'north korea': 'PRK',
-    'united states': 'USA', 'usa': 'USA',
-    'england': 'ENG', 'spain': 'ESP', 'france': 'FRA',
-    'germany': 'DEU', 'italy': 'ITA', 'portugal': 'PRT',
-    'argentina': 'ARG', 'brazil': 'BRA', 'mexico': 'MEX'
-  };
-  return isoMap[limpiarNombre(nombre)] || null;
-}
-
-function coincideEquipo(evento, game) {
-  const localESPN = evento.local || '';
-  const visitanteESPN = evento.visitante || '';
-  const homeAPI = game.home_team || '';
-  const awayAPI = game.away_team || '';
-
-  // 1. Filtrar por deporte/liga
-  if (evento.sport !== 'soccer' && evento.sport !== 'basketball' && evento.sport !== 'baseball' && evento.sport !== 'mma') {
-    return { score: 0, esCruzado: false };
-  }
-
-  // 2. Verificar códigos ISO para selecciones
-  const isoLocalESPN = tieneCodigoISO(localESPN);
-  const isoVisitanteESPN = tieneCodigoISO(visitanteESPN);
-  const isoHomeAPI = tieneCodigoISO(homeAPI);
-  const isoAwayAPI = tieneCodigoISO(awayAPI);
-
-  let scoreDirecto = 0, scoreCruzado = 0;
-
-  if (isoLocalESPN && isoVisitanteESPN && isoHomeAPI && isoAwayAPI) {
-    scoreDirecto = (isoLocalESPN === isoHomeAPI && isoVisitanteESPN === isoAwayAPI) ? 1.0 : 0;
-    scoreCruzado = (isoLocalESPN === isoAwayAPI && isoVisitanteESPN === isoHomeAPI) ? 1.0 : 0;
-  } else {
-    const localL = limpiarNombre(localESPN);
-    const visitL = limpiarNombre(visitanteESPN);
-    const homeL = limpiarNombre(homeAPI);
-    const awayL = limpiarNombre(awayAPI);
-
-    scoreDirecto = Math.max(
-      sorensenDice(localL, homeL) * 0.6 + jaccardTokens(localL, homeL) * 0.4,
-      sorensenDice(visitL, awayL) * 0.6 + jaccardTokens(visitL, awayL) * 0.4
-    );
-    scoreCruzado = Math.max(
-      sorensenDice(localL, awayL) * 0.6 + jaccardTokens(localL, awayL) * 0.4,
-      sorensenDice(visitL, homeL) * 0.6 + jaccardTokens(visitL, homeL) * 0.4
-    );
-  }
-
-  const score = Math.max(scoreDirecto, scoreCruzado);
-  return { score, esCruzado: scoreCruzado > scoreDirecto };
-}
-// ==================== FIN FUNCIONES DE SIMILITUD ====================
-
 async function enriquecerConCuotas(eventos) {
   const apiKey = getApiKey();
   if (!apiKey) {
@@ -467,13 +376,8 @@ async function enriquecerConCuotas(eventos) {
     const cacheEntry = oddsCache[cacheKey];
     let juegos = null;
 
-<<<<<<< HEAD
-    // Usar caché si es válido (menos de 12h)
-    if (cacheEntry && (Date.now() - cacheEntry.timestamp) < 12 * 60 * 60 * 1000) {
-=======
     // Usar caché si es válido (menos de 5 minutos)
     if (cacheEntry && (Date.now() - cacheEntry.timestamp) < 5 * 60 * 1000) {
->>>>>>> 1d4c54d (🚀 [PROTOCOLO V9.0] ACTIVADO - Mercados múltiples (h2h, spreads, totals))
       juegos = cacheEntry.data;
     } else {
       try {
@@ -497,31 +401,6 @@ async function enriquecerConCuotas(eventos) {
 
     // Procesar cada evento con TODOS los mercados
     for (const evento of eventosGrupo) {
-<<<<<<< HEAD
-      for (const game of juegos) {
-        const { score, esCruzado } = coincideEquipo(evento, game);
-        if (score < 0.82) continue;
-
-        const bookmakers = game.bookmakers?.[0];
-        if (!bookmakers?.markets?.[0]?.outcomes) continue;
-        const outcomes = bookmakers.markets[0].outcomes;
-
-        const homeApi = limpiarNombre(game.home_team || '');
-        const awayApi = limpiarNombre(game.away_team || '');
-
-        if (esCruzado) {
-          evento.cuota_local = outcomes.find(o => limpiarNombre(o.name) === awayApi)?.price || evento.cuota_local;
-          evento.cuota_visitante = outcomes.find(o => limpiarNombre(o.name) === homeApi)?.price || evento.cuota_visitante;
-        } else {
-          evento.cuota_local = outcomes.find(o => limpiarNombre(o.name) === homeApi)?.price || evento.cuota_local;
-          evento.cuota_visitante = outcomes.find(o => limpiarNombre(o.name) === awayApi)?.price || evento.cuota_visitante;
-        }
-        const outcomeEmpate = outcomes.find(o => o.name.toLowerCase() === 'draw');
-        if (outcomeEmpate) evento.cuota_empate = outcomeEmpate.price;
-
-        console.log(`✅ Cuota asignada (score: ${(score*100).toFixed(0)}%, ${esCruzado ? 'cruzada' : 'directa'}) a ${evento.local} vs ${evento.visitante}`);
-        break;
-=======
       let mejorCoincidencia = null;
       let mejorPuntuacion = 0;
       const UMBRAL_MINIMO = 0.70;
@@ -633,10 +512,10 @@ async function enriquecerConCuotas(eventos) {
         }
       } else {
         console.warn(`⚠️ Sin coincidencia > ${UMBRAL_MINIMO * 100}% para: ${evento.local} vs ${evento.visitante}`);
->>>>>>> 1d4c54d (🚀 [PROTOCOLO V9.0] ACTIVADO - Mercados múltiples (h2h, spreads, totals))
       }
     }
   }
+
   return eventos;
 }
 
@@ -706,86 +585,61 @@ app.get('/api/health', (req, res) => {
   });
 });
 
-// 🔥 RUTA /api/fixtures - DEVUELVE CUOTAS REALES DE TODOS LOS DEPORTES
 app.get('/api/fixtures', async (req, res) => {
   try {
     const cached = getCache('fixtures');
-    if (cached && cached.data && cached.data.length > 0) {
+    if (cached) {
       return res.json(cached);
     }
 
-    console.log('🔄 Cargando cuotas en vivo...');
-    const allEvents = [];
-    const sports = ['soccer', 'basketball', 'baseball', 'tennis', 'mma'];
+    // 🔥 ARREGLO: ESPERAR a que precalentarCache() termine ANTES de devolver
+    await precalentarCache();
     
-    for (const sport of sports) {
-      try {
-        const apiKey = getApiKey();
-        const url = `https://api.the-odds-api.com/v4/sports/${sport}/odds?apiKey=${apiKey}&markets=h2h,spreads,totals&regions=us`;
-        const { data: oddsData } = await axios.get(url, { timeout: 8000 });
-        
-        if (oddsData && oddsData.data) {
-          const parsed = oddsData.data.map(ev => ({
-            local: ev.home_team || ev.home_player || 'TBD',
-            visitante: ev.away_team || ev.away_player || 'TBD',
-            sport: sport,
-            evento_id: ev.id,
-            estado: new Date(ev.commence_time) > new Date() ? 'proximo' : 'en_vivo',
-            cuota_local: ev.bookmakers?.[0]?.markets?.find(m => m.key === 'h2h')?.outcomes?.[0]?.price,
-            cuota_empate: sport === 'soccer' ? ev.bookmakers?.[0]?.markets?.find(m => m.key === 'h2h')?.outcomes?.find(o => o.name === 'Draw')?.price : null,
-            cuota_visitante: ev.bookmakers?.[0]?.markets?.find(m => m.key === 'h2h')?.outcomes?.[1]?.price,
-            handicap_local: ev.bookmakers?.[0]?.markets?.find(m => m.key === 'spreads')?.outcomes?.[0]?.point,
-            handicap_local_cuota: ev.bookmakers?.[0]?.markets?.find(m => m.key === 'spreads')?.outcomes?.[0]?.price,
-            handicap_visitante: ev.bookmakers?.[0]?.markets?.find(m => m.key === 'spreads')?.outcomes?.[1]?.point,
-            handicap_visitante_cuota: ev.bookmakers?.[0]?.markets?.find(m => m.key === 'spreads')?.outcomes?.[1]?.price,
-            total_over_point: sport !== 'mma' ? ev.bookmakers?.[0]?.markets?.find(m => m.key === 'totals')?.outcomes?.find(o => o.name === 'Over')?.point : null,
-            total_over_price: sport !== 'mma' ? ev.bookmakers?.[0]?.markets?.find(m => m.key === 'totals')?.outcomes?.find(o => o.name === 'Over')?.price : null,
-            total_under_point: sport !== 'mma' ? ev.bookmakers?.[0]?.markets?.find(m => m.key === 'totals')?.outcomes?.find(o => o.name === 'Under')?.point : null,
-            total_under_price: sport !== 'mma' ? ev.bookmakers?.[0]?.markets?.find(m => m.key === 'totals')?.outcomes?.find(o => o.name === 'Under')?.price : null
-          })).filter(e => e.cuota_local || e.cuota_visitante);
-          
-          allEvents.push(...parsed);
-          console.log(`  ✅ ${sport}: ${parsed.length} eventos`);
-        }
-      } catch (err) {
-        console.log(`  ⚠️ ${sport}: ${err.message}`);
-      }
+    // Ahora obtener del caché (que fue guardado por precalentarCache)
+    const response = getCache('fixtures');
+    
+    if (response) {
+      res.json(response);
+    } else {
+      res.json({
+        status: 'no_data',
+        total: 0,
+        en_vivo: 0,
+        proximos: 0,
+        data: []
+      });
     }
-    
-    const response = {
-      status: allEvents.length > 0 ? 'success' : 'no_data',
-      total: allEvents.length,
-      en_vivo: allEvents.filter(e => e.estado === 'en_vivo').length,
-      proximos: allEvents.filter(e => e.estado === 'proximo').length,
-      data: allEvents
-    };
-    
-    setCache('fixtures', response, 300);
-    console.log(`✅ /api/fixtures: ${allEvents.length} eventos`);
-    res.json(response);
   } catch(err) {
-    console.error('❌ /api/fixtures:', err);
+    console.error('Error /api/fixtures:', err);
     res.status(500).json({ error: err.message, data: [] });
   }
 });
 
 app.post('/api/apostar', async (req, res) => {
-  const { uid, amount, evento, tipo, cuota, tipoSaldo } = req.body;
+  const { uid, amount, evento, tipo, cuota } = req.body;
+
   if (!uid || !amount || !evento || !tipo || !cuota) {
     return res.status(400).json({ error: 'Parámetros faltantes' });
   }
-  const saldoCampo = (tipoSaldo === 'promo') ? 'creditoPromo' : 'creditoReal';
+
   try {
-    const snap = await db.ref(`users/${uid}/${saldoCampo}`).once('value');
+    if (!db) {
+      return res.status(500).json({ error: 'Firebase no configurado' });
+    }
+
+    const snap = await db.ref(`users/${uid}/creditoReal`).once('value');
     const saldoActual = snap.val();
+
     if (saldoActual === null || saldoActual < amount) {
       return res.status(400).json({
         error: 'Saldo insuficiente',
         saldoActual: saldoActual || 0
       });
     }
+
     const saldoNuevo = saldoActual - amount;
-    await db.ref(`users/${uid}/${saldoCampo}`).set(saldoNuevo);
+    await db.ref(`users/${uid}/creditoReal`).set(saldoNuevo);
+
     const betId = Date.now().toString();
     await db.ref(`apuestas/${uid}/${betId}`).set({
       eventoNombre: evento,
@@ -794,10 +648,14 @@ app.post('/api/apostar', async (req, res) => {
       cuota: cuota,
       ganancia: Math.floor(amount * cuota),
       estado: 'pendiente',
-      fecha: Date.now(),
-      tipoSaldo: tipoSaldo || 'real'
+      fecha: Date.now()
     });
-    res.json({ success: true, saldoNuevo, betId });
+
+    res.json({
+      success: true,
+      saldoNuevo: saldoNuevo,
+      betId: betId
+    });
   } catch(err) {
     console.error('Error /api/apostar:', err);
     res.status(500).json({ error: err.message });
@@ -893,58 +751,8 @@ app.post('/api/chat', async (req, res) => {
   const GROQ_B64 = 'Z3NrX05rU01oNlBxdm9qdElnNTlrT1QyV0dkeWIzRlkwc3dDYVZHYzRGa055ZFV6OGZYcjl0SXc=';
   const groqKey = Buffer.from(GROQ_B64, 'base64').toString();
   if (!groqKey) return res.status(500).json({ error: 'Agente no configurado' });
-
-  // Obtener eventos reales desde la caché del sistema
-  let eventosContexto = '';
-  const cached = getCache('fixtures');
-  if (cached && cached.data) {
-    const eventos = cached.data.filter(e => e.cuota_local && e.cuota_local > 1.0);
-    if (eventos.length > 0) {
-      eventosContexto = '\n\n📊 EVENTOS REALES DISPONIBLES AHORA (usa SOLO estos datos, no inventes):\n';
-      eventos.forEach((e, i) => {
-        eventosContexto += `${i+1}. ⚽ ${e.local} vs ${e.visitante}\n   Cuotas: Local=${e.cuota_local} | Empate=${e.cuota_empate || 'N/A'} | Visitante=${e.cuota_visitante}\n   Liga: ${e.liga || 'Desconocida'}\n\n`;
-      });
-      eventosContexto += '⚠️ SOLO puedes recomendar estos eventos. NO inventes partidos ni cuotas.';
-    }
-  }
-
   try {
-    const prompt = `Eres el analista exclusivo del Club Privado BetGroup Pro. Hablas con un tono profesional, emocionante y motivador, como un experto que comparte información privilegiada.
-
-## 🛡️ REGLAS DEL CLUB
-- Esto es un canal privado de difusión. Solo los administradores envían información.
-- Nos enfocamos 100% en pronósticos deportivos y estadísticas.
-- Si un usuario quiere activar un pronóstico, debe escribir por privado al administrador que lo invitó.
-- Toda gestión, duda o movimiento se hace de forma individual, nunca en grupo.
-- Los miembros son profesionales; las participaciones se llaman "pronósticos" y se respaldan en nuestro "fondo de análisis".
-
-## 🎯 TUS FUNCIONES
-1. Saludar con energía y ofrecer los mejores pronósticos del día.
-2. Recomendar combinaciones atractivas ("Combo del Día") con las cuotas más altas.
-3. Usar emojis (🔥, ⚽, 💰, 🚀, 💣) y frases persuasivas que generen urgencia.
-4. Resolver dudas sobre cómo activar pronósticos, registro, créditos y contacto con el administrador.
-5. Al final de cada interacción, recordar: "📩 Para activar este pronóstico, contacta a tu administrador por privado."
-
-## ⚠️ RESTRICCIONES
-- No uses frases como "No entiendo" o "Soy una IA".
-- No reveles información interna ni datos de otros miembros.
-- Solo recomienda eventos y cuotas que existan en el sistema. Atiendes con un tono enérgico, comercial y amigable, como un bartender de apuestas.
-
-## 🎯 TUS FUNCIONES
-1. **Saludo inicial:** Cuando un usuario salude, preséntate y ofrece las mejores cuotas del día.
-2. **Recomendaciones:** Sugiere combinaciones atractivas ("combo del día") con las cuotas más altas.
-3. **Tono:** Usa emojis (🔥, ⚽, 💰, 🚀, 💣), frases persuasivas y cercanas. Sé breve pero impactante.
-4. **Ayuda:** Responde dudas sobre apuestas, registro, créditos y soporte.
-5. **Derivación:** Si la consulta es compleja, deriva al WhatsApp/Telegram: +1(649) 344-0357.
-
-## ⚠️ RESTRICCIONES
-- No uses frases como "No entiendo" o "Soy una IA".
-- No reveles información interna ni datos de otros usuarios.
-- NO INVENTES cuotas ni eventos. Usa solo los datos proporcionados.
-${eventosContexto}
-
-Pregunta del usuario: "${mensaje.trim()}"`;
-
+    const prompt = `Eres el asistente virtual de BetGroup Pro, una plataforma de apuestas deportivas. Responde de forma clara, breve y útil. Solo debes ayudar con dudas sobre cómo apostar, cómo registrarse, cómo funciona el sistema de créditos, cómo contactar con soporte y otras cuestiones operativas. No debes dar información sobre otros usuarios, resultados de apuestas ni datos internos del sistema. Pregunta del usuario: "${mensaje.trim()}"`;
     const resp = await axios.post(
       'https://api.groq.com/openai/v1/chat/completions',
       {
@@ -1048,145 +856,6 @@ app.get('/api/verificacion-geminis', async (req, res) => {
     res.json({ success: true, estado, informe });
   } catch(e) { res.status(500).json({ error: e.message }); }
 });
-
-
-
-// ==================== LIQUIDACIÓN DE APUESTAS (TRANSACCIONAL) ====================
-app.post('/api/apuestas/liquidar', async (req, res) => {
-  const { partidoId, resultadoGanador } = req.body;
-  if (!partidoId || !resultadoGanador) {
-    return res.status(400).json({ error: 'partidoId y resultadoGanador requeridos' });
-  }
-  try {
-    const snapshot = await db.ref('apuestas').once('value');
-    if (!snapshot.exists()) {
-      return res.status(200).json({ message: 'No hay apuestas para liquidar.' });
-    }
-    const todosUsuarios = snapshot.val();
-    let liquidadas = 0;
-
-    for (const uid of Object.keys(todosUsuarios)) {
-      const apuestasUsuario = todosUsuarios[uid];
-      for (const betId of Object.keys(apuestasUsuario)) {
-        const apuesta = apuestasUsuario[betId];
-        if (apuesta.estado !== 'pendiente') continue;
-        if (apuesta.eventoNombre !== partidoId) continue;
-
-        const gano = (apuesta.tipo === resultadoGanador);
-        const nuevoEstado = gano ? 'ganada' : 'perdida';
-
-        await db.ref(`apuestas/${uid}/${betId}`).update({ estado: nuevoEstado });
-
-        if (gano) {
-          const premio = parseFloat(apuesta.monto) * parseFloat(apuesta.cuota);
-          const userRef = db.ref(`users/${uid}/creditoReal`);
-          await userRef.transaction(current => (current || 0) + premio);
-
-          await db.ref('auditLog').push().set({
-            tipo: 'pago_premio',
-            uid,
-            betId,
-            montoPagado: premio,
-            fecha: Date.now()
-          });
-        }
-        liquidadas++;
-      }
-    }
-    res.json({ success: true, liquidadas, message: `${liquidadas} apuestas liquidadas.` });
-  } catch (error) {
-    res.status(500).json({ error: error.message });
-  }
-});
-// ==================== FIN LIQUIDACIÓN ====================
-
-
-
-// ==================== REINICIO DEL SISTEMA (MULTI-NODO) ====================
-app.post('/api/admin/reiniciar', async (req, res) => {
-  try {
-    const updates = {
-      'apuestas': null,
-      'historial': null,
-      'auditLog': null,
-      'transacciones': null
-    };
-    await db.ref().update(updates);
-    // Restaurar CEO por defecto
-    await db.ref('users/ceo_root').set({
-      uid: 'ceo_root',
-      nombre: 'CEO Principal',
-      rol: 'CEO',
-      creditoReal: 1000000,
-      creditoPromo: 0,
-      creadoPor: 'sistema'
-    });
-    res.status(200).json({ success: true, message: 'Sistema reiniciado. Auditoría e historial limpios.' });
-  } catch (error) {
-    res.status(500).json({ success: false, error: error.message });
-  }
-});
-// ==================== FIN REINICIO ====================
-
-
-
-// ==================== REFERIDOS FILTRADOS POR SUBADMIN ====================
-app.get('/api/usuarios/mis-referidos', async (req, res) => {
-  const subadminUid = req.query.subadminUid;
-  if (!subadminUid) return res.status(400).json({ error: 'subadminUid requerido' });
-  try {
-    const snapshot = await db.ref('users')
-      .orderByChild('creadoPor')
-      .equalTo(subadminUid)
-      .once('value');
-    const referidos = snapshot.val() ? Object.values(snapshot.val()) : [];
-    res.json(referidos);
-  } catch (error) {
-    res.status(500).json({ error: error.message });
-  }
-});
-// ==================== FIN REFERIDOS ====================
-
-
-
-// ==================== GENERAR CÓDIGO POR INICIAL DEL ROL ====================
-app.get('/api/admin/generar-codigo', async (req, res) => {
-  const { rol = 'ceo' } = req.query;
-  const rolesValidos = ['ceo', 'admin', 'moderador', 'soporte'];
-  if (!rolesValidos.includes(rol)) return res.status(400).json({ error: 'Rol no válido' });
-
-  const ahora = new Date();
-  const dia = String(ahora.getDate()).padStart(2, '0');
-  const mes = String(ahora.getMonth() + 1).padStart(2, '0');
-  const año = String(ahora.getFullYear()).slice(-2);
-  const hora = String(ahora.getHours()).padStart(2, '0');
-  const minuto = String(ahora.getMinutes()).padStart(2, '0');
-  const rolInicial = rol.charAt(0).toUpperCase();
-  const fecha = `${dia}${mes}${año}${hora}${minuto}`;
-  const random = Math.random().toString(36).substring(2, 6).toUpperCase();
-  const codigo = `${rolInicial}${fecha}${random}`;
-
-  res.json({ success: true, codigo, rol, formato: `${rolInicial}[DÍA][MES][AÑO][HORA][MINUTO][RANDOM_4]` });
-});
-// ==================== FIN GENERAR CÓDIGO ====================
-
-
-
-// ==================== APLICAR CÓDIGO CEO ====================
-app.post('/api/admin/aplicar-codigo', async (req, res) => {
-  const { codigo, uid } = req.body;
-  if (!codigo || !uid) return res.status(400).json({ error: 'Código o UID faltante' });
-
-  const rolMap = { 'C': 'ceo', 'A': 'admin', 'M': 'moderador', 'S': 'soporte' };
-  const rol = rolMap[codigo.charAt(0)];
-  if (!rol) return res.status(400).json({ error: 'Código no válido' });
-
-  await db.ref(`users/${uid}/rol`).set(rol);
-  await db.ref(`auditLog/${Date.now()}`).set({ accion: 'rol_asignado', uid, rol, codigo, fecha: new Date().toISOString() });
-
-  res.json({ success: true, uid, rol, mensaje: `Rol "${rol}" asignado al usuario ${uid}` });
-});
-// ==================== FIN APLICAR CÓDIGO ====================
 
 
 app.listen(PORT, () => {
