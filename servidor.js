@@ -729,7 +729,7 @@ app.get('/api/agents-status', async (req, res) => {
     } catch(e) { status.Agente_groc01 = 'error: ' + e.message; }
   } else { status.Agente_groc01 = 'no_key'; }
 
-  const tavilyKey = process.env.TAVILY_API_KEY;
+// [BOTPRESS]   const tavilyKey = process.env.TAVILY_API_KEY;
   status.Athos_Tavily = tavilyKey ? 'configured' : 'no_key';
   res.json({ success: true, agents: status, timestamp: new Date().toISOString() });
 });
@@ -851,6 +851,40 @@ app.get('/api/verificacion-geminis', async (req, res) => {
   } catch(e) { res.status(500).json({ error: e.message }); }
 });
 
+
+
+// [BOTPRESS] Nuevo endpoint unificado
+app.post('/api/botpress', async (req, res) => {
+    const { message, userId } = req.body;
+    if (!message) return res.status(400).json({ error: 'Falta message' });
+
+    const BOTPRESS_PAT = 'bp_pat_P0qf7HAVhl15wfGz2UMoM4ZiQfHzbzmD5yNx';
+    const BOT_ID = '32429f0f-8a50-4787-ad93-7a6d8bc06cce';
+
+    try {
+        const response = await fetch('https://api.botpress.cloud/v1/chat/messages', {
+            method: 'POST',
+            headers: {
+                'Authorization': `Bearer ${BOTPRESS_PAT}`,
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                conversationId: userId || 'default-user',
+                payload: {
+                    type: 'text',
+                    text: message
+                }
+            })
+        });
+        const data = await response.json();
+        // Extraer la respuesta del bot (ajustar según estructura real)
+        const botReply = data?.responses?.[0]?.payload?.text || data?.text || 'Sin respuesta';
+        res.json({ reply: botReply });
+    } catch (err) {
+        console.error('Botpress error:', err);
+        res.status(500).json({ error: 'Error al contactar Botpress' });
+    }
+});
 
 app.listen(PORT, () => {
   console.log(`✅ Proxy escuchando en puerto ${PORT}`);
