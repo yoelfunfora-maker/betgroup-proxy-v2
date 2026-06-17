@@ -340,137 +340,182 @@ const oddsCache = {};
 
 
 async function enriquecerConCuotas(eventos) {
-  console.log(`[enriquecerConCuotas] Iniciando con ${eventos.length} eventos`);
-  
   const apiKey = getApiKey();
-  let intento = 0;
-  let conCuotasReales = 0;
-
   if (!apiKey) {
-    console.error('🚨 Sin The Odds API Key');
-    // FALLBACK INMEDIATO: Todos con cuotas default
-    for (const evento of eventos) {
-      evento.cuota_local = 2.00;
-      evento.cuota_visitante = 1.80;
-      evento.cuota_empate = 3.50;
-      evento.handicap_local = -0.5;
-      evento.handicap_local_cuota = 1.91;
-      evento.handicap_visitante = 0.5;
-      evento.handicap_visitante_cuota = 1.95;
-      evento.total_over_point = 2.5;
-      evento.total_over_price = 1.89;
-      evento.total_under_point = 2.5;
-      evento.total_under_price = 1.95;
-    }
+    console.warn('⚠️ Sin The Odds API Key - usando cuotas por defecto');
     return eventos;
   }
 
   const sportKeyMap = {
-    'soccer': () => 'soccer_fifa_world_cup',
-    'basketball': () => 'basketball_nba',
-    'baseball': () => 'baseball_mlb',
-    'mma': () => 'mma_mixed_martial_arts',
-    'tennis': () => 'tennis_atp'
+    'soccer': (liga) => {
+    const l = (liga || '').toLowerCase();
+    if (l.includes('world') || l.includes('copa') || l.includes('fifa')) return 'soccer_fifa_world_cup';
+    if (l.includes('friendly') || l.includes('amistoso')) return 'soccer_international_friendly';
+    return 'soccer_epl';
+  },
+    'basketball': 'basketball_nba',
+    'baseball': 'baseball_mlb',
+    'mma': 'mma_mixed_martial_arts',
+    'tennis': 'tennis_atp'
   };
 
-  // Intentar obtener cuotas reales
+  // Agrupar eventos por sportKey
+  const grupos = {};
   for (const evento of eventos) {
-    const sportKeyFn = sportKeyMap[evento.sport];
-    if (!sportKeyFn) continue;
-    
-    const sportKey = sportKeyFn();
-    
-    try {
-      console.log(`[enriquecerConCuotas] Intentando ${sportKey} para ${evento.local} vs ${evento.visitante}...`);
-      
-      const url = `https://api.the-odds-api.com/v4/sports/${sportKey}/odds?apiKey=${apiKey}&markets=h2h,spreads,totals&regions=us`;
-      const response = await axios.get(url, { timeout: 3000 });
-      
-      if (response.data?.data && response.data.data.length > 0) {
-        const juegos = response.data.data;
+    const sportKey = typeof sportKeyMap[evento.sport] === 'function' 
+      ? sportKeyMap[evento.sport](evento.liga) 
+      : sportKeyMap[evento.sport];
+    if (!sportKey) continue;
+    if (!grupos[sportKey]) grupos[sportKey] = [];
+    grupos[sportKey].push(evento);
+  }
+
+  // Procesar cada grupo
+  for (const [sportKey, eventosGrupo] of Object.entries(grupos)) {
+    const cacheKey = `odds_${sportKey}`;
+    const cacheEntry = oddsCache[cacheKey];
+    let juegos = null;
+
+    // Usar caché si es válido (menos de 5 minutos)
+    if (cacheEntry && (Date.now() - cacheEntry.timestamp) < 5 * 60 * 1000) {
+      juegos = cacheEntry.data;
+    } else {
+      try {
+        console.log(`📡 Consultando The Odds API para: ${sportKey} (h2h, spreads, totals)...`);
         
-        // Buscar coincidencia simple
-        for (const game of juegos) {
-          const away = (game.away_team || '').toLowerCase();
-          const home = (game.home_team || '').toLowerCase();
-          const local = (evento.local || '').toLowerCase();
-          const visitante = (evento.visitante || '').toLowerCase();
-          
-          // Coincidencia simple: últimas palabras
-          const localUltima = local.split(' ').pop();
-          const visitanteUltima = visitante.split(' ').pop();
-          const awayUltima = away.split(' ').pop();
-          const homeUltima = home.split(' ').pop();
-          
-          if ((localUltima === homeUltima && visitanteUltima === awayUltima) ||
-              (localUltima === awayUltima && visitanteUltima === homeUltima)) {
-            
-            // Encontramos coincidencia - extraer cuotas
-            const bookmakers = game.bookmakers?.[0];
-            if (bookmakers?.markets) {
-              for (const market of bookmakers.markets) {
-                if (!market.outcomes) continue;
-                
-                if (market.key === 'h2h') {
-                  for (const outcome of market.outcomes) {
-                    if (outcome.name === 'Home') evento.cuota_local = outcome.price;
-                    if (outcome.name === 'Away') evento.cuota_visitante = outcome.price;
-                    if (outcome.name === 'Draw') evento.cuota_empate = outcome.price;
-                  }
-                }
-                if (market.key === 'spreads') {
-                  for (const outcome of market.outcomes) {
-                    if (outcome.name === 'Home') {
-                      evento.handicap_local = outcome.point;
-                      evento.handicap_local_cuota = outcome.price;
-                    }
-                    if (outcome.name === 'Away') {
-                      evento.handicap_visitante = outcome.point;
-                      evento.handicap_visitante_cuota = outcome.price;
-                    }
-                  }
-                }
-                if (market.key === 'totals') {
-                  for (const outcome of market.outcomes) {
-                    if (outcome.name === 'Over') {
-                      evento.total_over_point = outcome.point;
-                      evento.total_over_price = outcome.price;
-                    }
-                    if (outcome.name === 'Under') {
-                      evento.total_under_point = outcome.point;
-                      evento.total_under_price = outcome.price;
-                    }
-                  }
-                }
-              }
-              conCuotasReales++;
-              console.log(`[enriquecerConCuotas] ✅ ${evento.local} vs ${evento.visitante} - CUOTAS REALES`);
-              break;
-            }
-          }
+        // CAMBIO CLAVE: markets=h2h,spreads,totals
+        const url = `https://api.the-odds-api.com/v4/sports/${sportKey}/odds?apiKey=${apiKey}&markets=h2h,spreads,totals&regions=us`;
+        const response = await axios.get(url, { timeout: 5000 });
+        if (response.data) {
+          juegos = response.data.data || response.data;
+          oddsCache[cacheKey] = { data: juegos, timestamp: Date.now() };
+          console.log(`✅ Obtenidas cuotas para ${juegos.length} eventos de ${sportKey}`);
+        }
+      } catch(err) {
+        console.error(`❌ Error consultando cuotas para ${sportKey}:`, err.message);
+        continue;
+      }
+    }
+
+    if (!juegos) continue;
+
+    // Procesar cada evento con TODOS los mercados
+    for (const evento of eventosGrupo) {
+      let mejorCoincidencia = null;
+      let mejorPuntuacion = 0;
+      const UMBRAL_MINIMO = 0.70;
+
+      for (const game of juegos) {
+        const puntuacion = calcularPuntuacionSimilitud(evento, game);
+        
+        if (puntuacion.mejor > mejorPuntuacion && puntuacion.mejor >= UMBRAL_MINIMO) {
+          mejorPuntuacion = puntuacion.mejor;
+          mejorCoincidencia = {
+            game: game,
+            tipo: puntuacion.tipo,
+            puntuacion: puntuacion.mejor
+          };
         }
       }
-    } catch(err) {
-      console.warn(`[enriquecerConCuotas] ⚠️ The Odds API error (${err.message}) - usando fallback`);
+
+      if (mejorCoincidencia) {
+        const game = mejorCoincidencia.game;
+        const bookmakers = game.bookmakers?.[0];
+        
+        if (bookmakers && bookmakers.markets) {
+          // ================== PROCESAR CADA MERCADO ==================
+          
+          for (const market of bookmakers.markets) {
+            if (!market.outcomes) continue;
+
+            // ========== MERCADO H2H (MONEYLINE) ==========
+            if (market.key === 'h2h') {
+              const outcomes = market.outcomes;
+              
+              if (mejorCoincidencia.tipo === 'directa') {
+                const homeOutcome = outcomes.find(o => o.name === 'Home');
+                const awayOutcome = outcomes.find(o => o.name === 'Away');
+                const drawOutcome = outcomes.find(o => o.name === 'Draw');
+                
+                if (homeOutcome) evento.cuota_local = homeOutcome.price;
+                if (awayOutcome) evento.cuota_visitante = awayOutcome.price;
+                if (drawOutcome) evento.cuota_empate = drawOutcome.price;
+              } else {
+                // CRUZADO: local es away, visitante es home
+                const homeOutcome = outcomes.find(o => o.name === 'Home');
+                const awayOutcome = outcomes.find(o => o.name === 'Away');
+                const drawOutcome = outcomes.find(o => o.name === 'Draw');
+                
+                if (homeOutcome) evento.cuota_visitante = homeOutcome.price;
+                if (awayOutcome) evento.cuota_local = awayOutcome.price;
+                if (drawOutcome) evento.cuota_empate = drawOutcome.price;
+              }
+              
+              console.log(`✅ H2H [${evento.local} vs ${evento.visitante}]: ${evento.cuota_local} | ${evento.cuota_visitante}`);
+            }
+            
+            // ========== MERCADO SPREADS (HANDICAP) ==========
+            if (market.key === 'spreads') {
+              const outcomes = market.outcomes;
+              
+              if (mejorCoincidencia.tipo === 'directa') {
+                const homeSpread = outcomes.find(o => o.name === 'Home');
+                const awaySpread = outcomes.find(o => o.name === 'Away');
+                
+                if (homeSpread) {
+                  evento.handicap_local = homeSpread.point;
+                  evento.handicap_local_cuota = homeSpread.price;
+                }
+                if (awaySpread) {
+                  evento.handicap_visitante = awaySpread.point;
+                  evento.handicap_visitante_cuota = awaySpread.price;
+                }
+              } else {
+                // CRUZADO
+                const homeSpread = outcomes.find(o => o.name === 'Home');
+                const awaySpread = outcomes.find(o => o.name === 'Away');
+                
+                if (homeSpread) {
+                  evento.handicap_visitante = homeSpread.point;
+                  evento.handicap_visitante_cuota = homeSpread.price;
+                }
+                if (awaySpread) {
+                  evento.handicap_local = awaySpread.point;
+                  evento.handicap_local_cuota = awaySpread.price;
+                }
+              }
+              
+              console.log(`✅ SPREADS [${evento.local} vs ${evento.visitante}]: L(${evento.handicap_local}@${evento.handicap_local_cuota}) | V(${evento.handicap_visitante}@${evento.handicap_visitante_cuota})`);
+            }
+            
+            // ========== MERCADO TOTALS (OVER/UNDER) ==========
+            if (market.key === 'totals') {
+              const outcomes = market.outcomes;
+              
+              const overOutcome = outcomes.find(o => o.name === 'Over');
+              const underOutcome = outcomes.find(o => o.name === 'Under');
+              
+              if (overOutcome) {
+                evento.total_over_point = overOutcome.point;
+                evento.total_over_price = overOutcome.price;
+              }
+              if (underOutcome) {
+                evento.total_under_point = underOutcome.point;
+                evento.total_under_price = underOutcome.price;
+              }
+              
+              console.log(`✅ TOTALS [${evento.local} vs ${evento.visitante}]: O(${evento.total_over_point}@${evento.total_over_price}) | U(${evento.total_under_point}@${evento.total_under_price})`);
+            }
+          }
+          
+          console.log(`✨ Evento completo [${evento.local} vs ${evento.visitante}] con ${Object.keys(evento).filter(k => evento[k] !== null && k.includes('cuota') || k.includes('handicap') || k.includes('total')).length} mercados`);
+        }
+      } else {
+        console.warn(`⚠️ Sin coincidencia > ${UMBRAL_MINIMO * 100}% para: ${evento.local} vs ${evento.visitante}`);
+      }
     }
   }
 
-  // FALLBACK FINAL: Garantizar que TODOS tengan cuotas
-  for (const evento of eventos) {
-    evento.cuota_local = evento.cuota_local || 2.00;
-    evento.cuota_visitante = evento.cuota_visitante || 1.80;
-    evento.cuota_empate = evento.cuota_empate || 3.50;
-    evento.handicap_local = evento.handicap_local ?? -0.5;
-    evento.handicap_local_cuota = evento.handicap_local_cuota || 1.91;
-    evento.handicap_visitante = evento.handicap_visitante ?? 0.5;
-    evento.handicap_visitante_cuota = evento.handicap_visitante_cuota || 1.95;
-    evento.total_over_point = evento.total_over_point || 2.5;
-    evento.total_over_price = evento.total_over_price || 1.89;
-    evento.total_under_point = evento.total_under_point || 2.5;
-    evento.total_under_price = evento.total_under_price || 1.95;
-  }
-
-  console.log(`[enriquecerConCuotas] ✅ COMPLETADO: ${conCuotasReales} de The Odds API, ${eventos.length - conCuotasReales} de fallback`);
   return eventos;
 }
 
