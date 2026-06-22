@@ -204,10 +204,18 @@ async function enriquecerConCuotas(eventos) {
 
         if (response.data) {
           for (const game of response.data) {
-            if (
-              (game.home_team?.includes(ev.local) || ev.local.includes(game.home_team)) &&
-              (game.away_team?.includes(ev.visitante) || ev.visitante.includes(game.away_team))
-            ) {
+            // Match flexible: compara palabras clave del nombre
+              function matchName(a, b) {
+                if (!a || !b) return false;
+                const normalize = s => s.toLowerCase().replace(/[^a-z0-9 ]/g,'').trim();
+                const na = normalize(a); const nb = normalize(b);
+                if (na.includes(nb) || nb.includes(na)) return true;
+                // Match por apellido (última palabra)
+                const lastA = na.split(' ').pop();
+                const lastB = nb.split(' ').pop();
+                return lastA.length > 3 && lastA === lastB;
+              }
+              if (matchName(game.home_team, ev.local) && matchName(game.away_team, ev.visitante)) {
               const bookmakers = game.bookmakers?.[0];
               // Mercado h2h (cuotas 1x2)
               const mktH2h = bookmakers.markets?.find(m => m.key === 'h2h');
