@@ -122,7 +122,7 @@ function parseEvents(espnData, sport) {
     if (!comp) continue;
 
     const eventTime = new Date(ev.date || 0).getTime();
-    if (eventTime < ahora || eventTime > dentro14dias) continue;
+    if (eventTime > dentro14dias) continue;  // Permitir live (eventTime en el pasado)
 
     const status = ev.status?.type?.state;
     if (status !== 'in' && status !== 'pre') continue;
