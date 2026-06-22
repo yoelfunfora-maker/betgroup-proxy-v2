@@ -961,6 +961,20 @@ app.post('/api/admin/aplicar-codigo', async (req, res) => {
 // ==================== FIN APLICAR CÓDIGO ====================
 
 
+
+// Endpoint temporal para limpiar el caché y forzar recarga de cuotas
+app.post('/api/clear-cache', async (req, res) => {
+    clearCache('fixtures');
+    console.log('🧹 Caché limpiado. Forzando precalentarCache...');
+    res.json({ status: 'clearing', message: 'Caché limpiado, recargando datos...' });
+    try {
+        await precalentarCache();
+        console.log('✅ Cache regenerado con nuevos mercados');
+    } catch(e) {
+        console.error('Error regenerando caché:', e.message);
+    }
+});
+
 app.listen(PORT, () => {
   console.log(`✅ Proxy escuchando en puerto ${PORT}`);
   precalentarCache();
