@@ -187,7 +187,7 @@ async function enriquecerConCuotas(eventos) {
     try {
       const sportKeys = DEPORTES_ODDS[ev.sport] || [];
       for (const sportKey of sportKeys) {
-        const url = `https://api.the-odds-api.com/v4/sports/${sportKey}/odds?apiKey=${apiKey}&markets=h2h`;
+        const url = `https://api.the-odds-api.com/v4/sports/${sportKey}/odds?apiKey=${apiKey}&markets=h2h,spreads,totals`;
         const response = await new Promise((resolve, reject) => {
           https.get(url, (res) => {
             let data = '';
@@ -209,10 +209,29 @@ async function enriquecerConCuotas(eventos) {
               (game.away_team?.includes(ev.visitante) || ev.visitante.includes(game.away_team))
             ) {
               const bookmakers = game.bookmakers?.[0];
-              if (bookmakers?.markets?.[0]?.outcomes) {
-                const outcomes = bookmakers.markets[0].outcomes;
-                ev.cuota_local = outcomes.find(o => o.name === 'Home')?.price || 0;
-                ev.cuota_visitante = outcomes.find(o => o.name === 'Away')?.price || 0;
+              // Mercado h2h (cuotas 1x2)
+              const mktH2h = bookmakers.markets?.find(m => m.key === 'h2h');
+              if (mktH2h?.outcomes) {
+                ev.cuota_local = mktH2h.outcomes.find(o => o.name === game.home_team)?.price || 0;
+                ev.cuota_visitante = mktH2h.outcomes.find(o => o.name === game.away_team)?.price || 0;
+                const draw = mktH2h.outcomes.find(o => o.name === 'Draw');
+                if (draw) ev.cuota_empate = draw.price;
+              }
+              // Mercado spreads (handicap)
+              const mktSpreads = bookmakers.markets?.find(m => m.key === 'spreads');
+              if (mktSpreads?.outcomes) {
+                const homeSpread = mktSpreads.outcomes.find(o => o.name === game.home_team);
+                const awaySpread = mktSpreads.outcomes.find(o => o.name === game.away_team);
+                if (homeSpread) { ev.handicap_local = homeSpread.point; ev.handicap_local_cuota = homeSpread.price; }
+                if (awaySpread) { ev.handicap_visitante = awaySpread.point; ev.handicap_visitante_cuota = awaySpread.price; }
+              }
+              // Mercado totals (over/under)
+              const mktTotals = bookmakers.markets?.find(m => m.key === 'totals');
+              if (mktTotals?.outcomes) {
+                const over = mktTotals.outcomes.find(o => o.name === 'Over');
+                const under = mktTotals.outcomes.find(o => o.name === 'Under');
+                if (over) { ev.total_over_point = over.point; ev.total_over_price = over.price; }
+                if (under) { ev.total_under_point = under.point; ev.total_under_price = under.price; }
               }
               break;
             }
