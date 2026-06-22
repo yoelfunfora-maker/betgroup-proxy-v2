@@ -352,6 +352,27 @@ app.post('/api/apostar', async (req, res) => {
 // INICIAR SERVIDOR
 // ════════════════════════════════════════════════════════════════
 
+
+// ════ ENDPOINT TEMPORAL DE DIAGNÓSTICO ════
+app.get('/api/debug-espn', async (req, res) => {
+  try {
+    const data = await fetchESPN('baseball/mlb/scoreboard');
+    const events = data.events || [];
+    const ahora = Date.now();
+    const dentro14dias = ahora + 14 * 24 * 60 * 60 * 1000;
+    const resumen = events.slice(0,5).map(ev => ({
+      name: ev.name,
+      date: ev.date,
+      state: ev.status?.type?.state,
+      eventTime: new Date(ev.date||0).getTime(),
+      pasaFiltro: new Date(ev.date||0).getTime() <= dentro14dias
+    }));
+    res.json({ total: events.length, ahora: new Date(ahora).toISOString(), resumen });
+  } catch(err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 app.listen(PORT, () => {
   console.log(`✅ Proxy escuchando en puerto ${PORT}`);
   precalentarCache();
