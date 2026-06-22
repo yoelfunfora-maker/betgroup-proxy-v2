@@ -348,7 +348,7 @@ async function enriquecerConCuotas(eventos) {
     'basketball': 'basketball_nba',
     'baseball': 'baseball_mlb',
     'mma': 'mma_mixed_martial_arts',
-    'tennis': 'tennis_atp_wimbledon'
+    'tennis': 'tennis_atp'
   };
 
   // Agrupar eventos por sportKey
@@ -376,7 +376,7 @@ async function enriquecerConCuotas(eventos) {
       if (sportKey === 'mma_mixed_martial_arts') {
         console.log('🔍 MMA: Buscando cuotas para eventos de artes marciales mixtas');
       }
-        const url = `https://api.the-odds-api.com/v4/sports/${sportKey}/odds?apiKey=${apiKey}&markets=h2h,spreads,totals&regions=us`;
+        const url = `https://api.the-odds-api.com/v4/sports/${sportKey}/odds?apiKey=${apiKey}&markets=h2h&regions=us`;
         const response = await axios.get(url, { timeout: 5000 });
         if (response.data) {
           juegos = response.data.data || response.data; // la API a veces devuelve {data: [...]}
@@ -396,52 +396,22 @@ async function enriquecerConCuotas(eventos) {
         const { score, esCruzado } = coincideEquipo(evento, game);
         if (score < 0.82) continue;
 
-        const bookmaker = game.bookmakers?.[0];
-        if (!bookmaker?.markets) continue;
+        const bookmakers = game.bookmakers?.[0];
+        if (!bookmakers?.markets?.[0]?.outcomes) continue;
+        const outcomes = bookmakers.markets[0].outcomes;
 
         const homeApi = limpiarNombre(game.home_team || '');
         const awayApi = limpiarNombre(game.away_team || '');
 
-        // Procesar TODOS los mercados (h2h, spreads, totals)
-        for (const market of bookmaker.markets) {
-          const outcomes = market.outcomes || [];
-          const key = market.key;
-
-          if (key === 'h2h') {
-            if (esCruzado) {
-              evento.cuota_local = outcomes.find(o => limpiarNombre(o.name) === awayApi)?.price || evento.cuota_local;
-              evento.cuota_visitante = outcomes.find(o => limpiarNombre(o.name) === homeApi)?.price || evento.cuota_visitante;
-            } else {
-              evento.cuota_local = outcomes.find(o => limpiarNombre(o.name) === homeApi)?.price || evento.cuota_local;
-              evento.cuota_visitante = outcomes.find(o => limpiarNombre(o.name) === awayApi)?.price || evento.cuota_visitante;
-            }
-            const empate = outcomes.find(o => o.name && o.name.toLowerCase() === 'draw');
-            if (empate) evento.cuota_empate = empate.price;
-          }
-
-          if (key === 'spreads') {
-            if (esCruzado) {
-              evento.handicap_local = outcomes.find(o => limpiarNombre(o.name) === awayApi)?.point || null;
-              evento.handicap_visitante = outcomes.find(o => limpiarNombre(o.name) === homeApi)?.point || null;
-            } else {
-              evento.handicap_local = outcomes.find(o => limpiarNombre(o.name) === homeApi)?.point || null;
-              evento.handicap_visitante = outcomes.find(o => limpiarNombre(o.name) === awayApi)?.point || null;
-            }
-          }
-
-          if (key === 'totals') {
-            const over = outcomes.find(o => o.name === 'Over');
-            const under = outcomes.find(o => o.name === 'Under');
-            if (over) {
-              evento.total_over_point = over.point;
-              evento.total_over_price = over.price;
-            }
-            if (under) {
-              evento.total_under_point = under.point;
-              evento.total_under_price = under.price;
-            }
-          }
+        if (esCruzado) {
+          evento.cuota_local = outcomes.find(o => limpiarNombre(o.name) === awayApi)?.price || evento.cuota_local;
+          evento.cuota_visitante = outcomes.find(o => limpiarNombre(o.name) === homeApi)?.price || evento.cuota_visitante;
+        } else {
+          evento.cuota_local = outcomes.find(o => limpiarNombre(o.name) === homeApi)?.price || evento.cuota_local;
+          evento.cuota_visitante = outcomes.find(o => limpiarNombre(o.name) === awayApi)?.price || evento.cuota_visitante;
         }
+        const outcomeEmpate = outcomes.find(o => o.name.toLowerCase() === 'draw');
+        if (outcomeEmpate) evento.cuota_empate = outcomeEmpate.price;
 
         console.log(`✅ Cuota asignada (score: ${(score*100).toFixed(0)}%, ${esCruzado ? 'cruzada' : 'directa'}) a ${evento.local} vs ${evento.visitante}`);
         break;
@@ -960,20 +930,6 @@ app.post('/api/admin/aplicar-codigo', async (req, res) => {
 });
 // ==================== FIN APLICAR CÓDIGO ====================
 
-
-
-// Endpoint temporal para limpiar el caché y forzar recarga de cuotas
-app.post('/api/clear-cache', async (req, res) => {
-    clearCache('fixtures');
-    console.log('🧹 Caché limpiado. Forzando precalentarCache...');
-    res.json({ status: 'clearing', message: 'Caché limpiado, recargando datos...' });
-    try {
-        await precalentarCache();
-        console.log('✅ Cache regenerado con nuevos mercados');
-    } catch(e) {
-        console.error('Error regenerando caché:', e.message);
-    }
-});
 
 app.listen(PORT, () => {
   console.log(`✅ Proxy escuchando en puerto ${PORT}`);
