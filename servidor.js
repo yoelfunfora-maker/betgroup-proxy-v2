@@ -995,7 +995,7 @@ app.post('/api/enriquecer', async (req, res) => {
 
 
 // ════ AGENTE UNIFICADO HUGGING FACE ════
-const HF_TOKEN = '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';
+const HF_TOKEN = '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';
 const HF_MODELS = {
   analisis: 'moonshotai/Kimi-K2-Instruct-0905',   // análisis de apuestas
   chat: 'meta-llama/Llama-3.1-70B-Instruct',      // soporte al usuario
