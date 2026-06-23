@@ -341,8 +341,8 @@ async function enriquecerConCuotas(eventos) {
   const sportKeyMap = {
     'soccer': (liga) => {
     const l = (liga || '').toLowerCase();
-    if (l.includes('world') || l.includes('copa') || l.includes('fifa')) return 'soccer_fifa_world_cup';
-    if (l.includes('friendly') || l.includes('amistoso')) return 'soccer_international_friendly';
+    if (l.includes('world') || l.includes('copa') || l.includes('fifa')) return 'soccer_epl';
+    if (l.includes('friendly') || l.includes('amistoso')) return 'soccer_spain_la_liga';
     return 'soccer_epl';
   },
     'basketball': 'basketball_nba',
@@ -472,8 +472,8 @@ async function precalentarCache() {
   const deportes = [
     { path: 'basketball/nba/scoreboard', sport: 'basketball' },
     { path: 'baseball/mlb/scoreboard', sport: 'baseball' },
-    { path: 'soccer/fifa.friendly/scoreboard', sport: 'soccer' },
-    { path: 'soccer/fifa.world/scoreboard', sport: 'soccer' },
+    { path: 'soccer/eng.1/scoreboard', sport: 'soccer' },
+    { path: 'soccer/esp.1/scoreboard', sport: 'soccer' },
     { path: 'tennis/wta/scoreboard', sport: 'tennis' },
     { path: 'mma/ufc/scoreboard', sport: 'mma' }
   ];
