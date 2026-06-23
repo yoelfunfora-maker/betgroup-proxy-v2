@@ -234,7 +234,7 @@ function limpiarNombre(nombre) {
     .replace(/^ny\b|\bny$/g, 'new york')
     .replace(/^la\b|\bla$/g, 'los angeles')
     .replace(/^st\b|\bst\.?$/g, 'saint')
-    .replace(/\b(fc|cf|sc|ac|united|city|club|deportivo|real|san|los|las|the|of)\b/g, '')
+    .replace(/\b(fc|cf|sc|ac|bc|united|city|club|deportivo|real|san|los|las|the|of)\b/g, '')
     .replace(/[^a-z0-9ñ ]/g, ' ')
     .replace(/\s+/g, ' ')
     .trim();
