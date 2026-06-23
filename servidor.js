@@ -491,11 +491,11 @@ async function precalentarCache() {
   }
 
   await enriquecerConCuotas(allEvents);
-  // Si las cuotas no se obtuvieron, usar Athos
+// [HF]   // Si las cuotas no se obtuvieron, usar Athos
   const sinCuotas = allEvents.filter(e => !e.cuota_local || e.cuota_local <= 1.0);
   if (sinCuotas.length > 0) {
-    console.log(`Athos buscando cuotas para ${sinCuotas.length} eventos...`);
-    // Athos eliminado - el sistema usa solo The Odds API
+// [HF]     console.log(`Athos buscando cuotas para ${sinCuotas.length} eventos...`);
+// [HF]     // Athos eliminado - el sistema usa solo The Odds API
   }
 
   const response = {
@@ -637,7 +637,7 @@ app.get('/api/agents-status', async (req, res) => {
   const GROQ_B64 = 'Z3NrX05rU01oNlBxdm9qdElnNTlrT1QyV0dkeWIzRlkwc3dDYVZHYzRGa055ZFV6OGZYcjl0SXc=';
   const geminiKey = Buffer.from(GEMINI_B64, 'base64').toString();
   const groqKey   = Buffer.from(GROQ_B64, 'base64').toString();
-  const status = { Geminis02: 'unknown', Agente_groc01: 'unknown', Athos_Tavily: 'unknown' };
+// [HF]   const status = { Geminis02: 'unknown', Agente_groc01: 'unknown', Athos_Tavily: 'unknown' };
 
   if (geminiKey) {
     try {
@@ -661,8 +661,8 @@ app.get('/api/agents-status', async (req, res) => {
     } catch(e) { status.Agente_groc01 = 'error: ' + e.message; }
   } else { status.Agente_groc01 = 'no_key'; }
 
-  const tavilyKey = process.env.TAVILY_API_KEY;
-  status.Athos_Tavily = tavilyKey ? 'configured' : 'no_key';
+// [HF]   const tavilyKey = process.env.TAVILY_API_KEY;
+// [HF]   status.Athos_Tavily = tavilyKey ? 'configured' : 'no_key';
   res.json({ success: true, agents: status, timestamp: new Date().toISOString() });
 });
 
@@ -990,6 +990,41 @@ app.post('/api/enriquecer', async (req, res) => {
   } catch(err) {
     console.error('Error /api/enriquecer:', err.message);
     res.status(500).json({ error: err.message });
+  }
+});
+
+
+// ════ AGENTE UNIFICADO HUGGING FACE ════
+const HF_TOKEN = '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';
+const HF_MODELS = {
+  analisis: 'moonshotai/Kimi-K2-Instruct-0905',   // análisis de apuestas
+  chat: 'meta-llama/Llama-3.1-70B-Instruct',      // soporte al usuario
+  rapido: 'mistralai/Mixtral-8x7B-Instruct-v0.1'  // procesamiento rápido
+};
+
+app.post('/api/huggingface', async (req, res) => {
+  const { prompt, tarea } = req.body;
+  if (!prompt) return res.status(400).json({ error: 'Falta prompt' });
+  const model = HF_MODELS[tarea] || HF_MODELS['rapido'];
+  try {
+    const response = await fetch('https://router.huggingface.co/v1/chat/completions', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${HF_TOKEN}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        model: model,
+        messages: [{ role: 'user', content: prompt }],
+        max_tokens: 500
+      })
+    });
+    const data = await response.json();
+    const reply = data?.choices?.[0]?.message?.content || JSON.stringify(data);
+    res.json({ reply, model });
+  } catch(err) {
+    console.error('Hugging Face error:', err.message);
+    res.status(500).json({ error: 'Error al contactar Hugging Face' });
   }
 });
 
