@@ -312,9 +312,8 @@ function coincideEquipo(evento, game) {
   const awayAPI = game.away_team || '';
 
   // 1. Filtrar por deporte/liga
-  if (evento.sport !== 'soccer' && evento.sport !== 'basketball' && evento.sport !== 'baseball' && evento.sport !== 'mma') {
-    return { score: 0, esCruzado: false };
-  }
+  // Permitir todos los deportes (incluido tennis)
+  // El filtro se eliminó para permitir el matching de cualquier deporte
 
   // 2. Verificar códigos ISO para selecciones
   const isoLocalESPN = tieneCodigoISO(localESPN);
@@ -343,7 +342,17 @@ function coincideEquipo(evento, game) {
     );
   }
 
-  const score = Math.max(scoreDirecto, scoreCruzado);
+  let score = Math.max(scoreDirecto, scoreCruzado);
+  // Si el score es bajo, intentar solo con Sørensen-Dice (más permisivo)
+  if (score < 0.70) {
+    const localL = limpiarNombre(evento.local || '');
+    const visitL = limpiarNombre(evento.visitante || '');
+    const homeL = limpiarNombre(game.home_team || '');
+    const awayL = limpiarNombre(game.away_team || '');
+    const diceDirecto = Math.max(sorensenDice(localL, homeL), sorensenDice(visitL, awayL));
+    const diceCruzado = Math.max(sorensenDice(localL, awayL), sorensenDice(visitL, homeL));
+    score = Math.max(score, diceDirecto, diceCruzado);
+  }
   return { score, esCruzado: scoreCruzado > scoreDirecto };
 }
 // ==================== FIN FUNCIONES DE SIMILITUD ====================
@@ -431,7 +440,7 @@ async function enriquecerConCuotas(eventos) {
     for (const evento of eventosGrupo) {
       for (const game of juegos) {
         const { score, esCruzado } = coincideEquipo(evento, game);
-        if (score < 0.82) continue;
+        if (score < 0.70) continue;
 
         const bookmakers = game.bookmakers?.[0];
         if (!bookmakers?.markets) continue;
