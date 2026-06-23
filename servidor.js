@@ -954,7 +954,7 @@ app.post('/api/admin/aplicar-codigo', async (req, res) => {
 // ==================== FIN APLICAR CÓDIGO ====================
 
 
-clearCache('fixtures');
+setCache('fixtures', null);
 console.log('Caché de fixtures limpiado al inicio.');
 app.listen(PORT, () => {
   console.log(`✅ Proxy escuchando en puerto ${PORT}`);
