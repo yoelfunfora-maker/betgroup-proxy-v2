@@ -288,6 +288,23 @@ function tieneCodigoISO(nombre) {
   return isoMap[limpiarNombre(nombre)] || null;
 }
 
+
+// Similitud de Sørensen-Dice (bigramas) para matching fuzzy
+function diceSimilarity(a, b) {
+  if (a === b) return 1.0;
+  if (a.length < 2 || b.length < 2) return 0.0;
+  const bigrams = (s) => {
+    const bg = new Set();
+    for (let i = 0; i < s.length - 1; i++) bg.add(s.substring(i, i + 2));
+    return bg;
+  };
+  const bgA = bigrams(a);
+  const bgB = bigrams(b);
+  let intersection = 0;
+  for (const bg of bgA) if (bgB.has(bg)) intersection++;
+  return (2.0 * intersection) / (bgA.size + bgB.size);
+}
+
 function coincideEquipo(evento, game) {
   const localESPN = evento.local || '';
   const visitanteESPN = evento.visitante || '';
