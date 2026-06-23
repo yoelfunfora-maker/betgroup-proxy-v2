@@ -348,7 +348,7 @@ async function enriquecerConCuotas(eventos) {
     'basketball': 'basketball_nba',
     'baseball': 'baseball_mlb',
     'mma': 'mma_mixed_martial_arts',
-    'tennis': 'tennis_atp'
+    'tennis': 'tennis_atp_wimbledon'
   };
 
   // Agrupar eventos por sportKey
@@ -954,6 +954,8 @@ app.post('/api/admin/aplicar-codigo', async (req, res) => {
 // ==================== FIN APLICAR CÓDIGO ====================
 
 
+clearCache('fixtures');
+console.log('Caché de fixtures limpiado al inicio.');
 app.listen(PORT, () => {
   console.log(`✅ Proxy escuchando en puerto ${PORT}`);
   precalentarCache();
