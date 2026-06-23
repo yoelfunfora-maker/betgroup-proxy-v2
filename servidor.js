@@ -999,7 +999,7 @@ const HF_TOKEN = process.env.HF_TOKEN || '';
 const HF_MODELS = {
   analisis: 'moonshotai/Kimi-K2-Instruct-0905',   // análisis de apuestas
   chat: 'meta-llama/Llama-3.3-70B-Instruct',      // soporte al usuario
-  rapido: 'mistralai/Mistral-Small-3.1-24B-Instruct-2503'  // procesamiento rápido
+  rapido: 'Qwen/Qwen2.5-7B-Instruct'  // procesamiento rápido
 };
 
 app.post('/api/huggingface', async (req, res) => {
