@@ -373,16 +373,35 @@ async function enriquecerConCuotas(eventos) {
     } else {
       try {
         console.log(`📡 Consultando The Odds API para: ${sportKey}...`);
-      if (sportKey === 'mma_mixed_martial_arts') {
-        console.log('🔍 MMA: Buscando cuotas para eventos de artes marciales mixtas');
-      }
+        if (sportKey === 'mma_mixed_martial_arts') {
+          console.log('🔍 MMA: Buscando cuotas para eventos de artes marciales mixtas');
+        }
         // MMA solo tiene h2h, los demás tienen spreads y totals también
         const mkts = sportKey === 'mma_mixed_martial_arts' ? 'h2h' : 'h2h,spreads,totals';
-        const url = `https://api.the-odds-api.com/v4/sports/${sportKey}/odds?apiKey=${apiKey}&markets=${mkts}&regions=us`;
-        const response = await axios.get(url, { timeout: 5000 });
-        if (response.data) {
-          juegos = response.data.data || response.data;
-          oddsCache[sportKey] = { data: juegos, timestamp: Date.now() };
+        // Intentar con múltiples claves si la primera falla (ej. 401 para MMA)
+        const apiKeys = [
+          'c56f6c464ebd4fb634c495a2c2488610',
+          'e18abd8956512f34027f0ac3f87fbe52',
+          '0e31c3149f0afbb009491a0cd80169f4'
+        ];
+        let success = false;
+        for (const key of apiKeys) {
+          try {
+            const url = `https://api.the-odds-api.com/v4/sports/${sportKey}/odds?apiKey=${key}&markets=${mkts}&regions=us`;
+            const response = await axios.get(url, { timeout: 5000 });
+            if (response.data) {
+              juegos = response.data.data || response.data;
+              oddsCache[sportKey] = { data: juegos, timestamp: Date.now() };
+              success = true;
+              break;
+            }
+          } catch(innerErr) {
+            console.warn(`  Clave falló: ${key.slice(0,10)}... (${innerErr.message})`);
+            continue;
+          }
+        }
+        if (!success) {
+          console.error(`  No se pudo obtener cuotas para ${sportKey} con ninguna clave.`);
         }
       } catch(err) {
         console.error(`Error cuotas para ${sportKey}:`, err.message);
