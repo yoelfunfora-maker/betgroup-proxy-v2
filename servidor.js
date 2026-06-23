@@ -376,10 +376,12 @@ async function enriquecerConCuotas(eventos) {
       if (sportKey === 'mma_mixed_martial_arts') {
         console.log('🔍 MMA: Buscando cuotas para eventos de artes marciales mixtas');
       }
-        const url = `https://api.the-odds-api.com/v4/sports/${sportKey}/odds?apiKey=${apiKey}&markets=h2h&regions=us`;
+        // MMA solo tiene h2h, los demás tienen spreads y totals también
+        const mkts = sportKey === 'mma_mixed_martial_arts' ? 'h2h' : 'h2h,spreads,totals';
+        const url = `https://api.the-odds-api.com/v4/sports/${sportKey}/odds?apiKey=${apiKey}&markets=${mkts}&regions=us`;
         const response = await axios.get(url, { timeout: 5000 });
         if (response.data) {
-          juegos = response.data.data || response.data; // la API a veces devuelve {data: [...]}
+          juegos = response.data.data || response.data;
           oddsCache[sportKey] = { data: juegos, timestamp: Date.now() };
         }
       } catch(err) {
@@ -397,21 +399,42 @@ async function enriquecerConCuotas(eventos) {
         if (score < 0.82) continue;
 
         const bookmakers = game.bookmakers?.[0];
-        if (!bookmakers?.markets?.[0]?.outcomes) continue;
-        const outcomes = bookmakers.markets[0].outcomes;
+        if (!bookmakers?.markets) continue;
 
         const homeApi = limpiarNombre(game.home_team || '');
         const awayApi = limpiarNombre(game.away_team || '');
 
-        if (esCruzado) {
-          evento.cuota_local = outcomes.find(o => limpiarNombre(o.name) === awayApi)?.price || evento.cuota_local;
-          evento.cuota_visitante = outcomes.find(o => limpiarNombre(o.name) === homeApi)?.price || evento.cuota_visitante;
-        } else {
-          evento.cuota_local = outcomes.find(o => limpiarNombre(o.name) === homeApi)?.price || evento.cuota_local;
-          evento.cuota_visitante = outcomes.find(o => limpiarNombre(o.name) === awayApi)?.price || evento.cuota_visitante;
+        // Mercado H2H
+        const mktH2h = bookmakers.markets.find(m => m.key === 'h2h');
+        if (mktH2h?.outcomes) {
+          if (esCruzado) {
+            evento.cuota_local = mktH2h.outcomes.find(o => limpiarNombre(o.name) === awayApi)?.price || evento.cuota_local;
+            evento.cuota_visitante = mktH2h.outcomes.find(o => limpiarNombre(o.name) === homeApi)?.price || evento.cuota_visitante;
+          } else {
+            evento.cuota_local = mktH2h.outcomes.find(o => limpiarNombre(o.name) === homeApi)?.price || evento.cuota_local;
+            evento.cuota_visitante = mktH2h.outcomes.find(o => limpiarNombre(o.name) === awayApi)?.price || evento.cuota_visitante;
+          }
+          const draw = mktH2h.outcomes.find(o => o.name.toLowerCase() === 'draw');
+          if (draw) evento.cuota_empate = draw.price;
         }
-        const outcomeEmpate = outcomes.find(o => o.name.toLowerCase() === 'draw');
-        if (outcomeEmpate) evento.cuota_empate = outcomeEmpate.price;
+
+        // Mercado Spreads (handicap)
+        const mktSpreads = bookmakers.markets.find(m => m.key === 'spreads');
+        if (mktSpreads?.outcomes) {
+          const homeSpread = mktSpreads.outcomes.find(o => limpiarNombre(o.name) === homeApi);
+          const awaySpread = mktSpreads.outcomes.find(o => limpiarNombre(o.name) === awayApi);
+          if (homeSpread) { evento.handicap_local = homeSpread.point; evento.handicap_local_cuota = homeSpread.price; }
+          if (awaySpread) { evento.handicap_visitante = awaySpread.point; evento.handicap_visitante_cuota = awaySpread.price; }
+        }
+
+        // Mercado Totals (over/under)
+        const mktTotals = bookmakers.markets.find(m => m.key === 'totals');
+        if (mktTotals?.outcomes) {
+          const over = mktTotals.outcomes.find(o => o.name === 'Over');
+          const under = mktTotals.outcomes.find(o => o.name === 'Under');
+          if (over) { evento.total_over_point = over.point; evento.total_over_price = over.price; }
+          if (under) { evento.total_under_point = under.point; evento.total_under_price = under.price; }
+        }
 
         console.log(`✅ Cuota asignada (score: ${(score*100).toFixed(0)}%, ${esCruzado ? 'cruzada' : 'directa'}) a ${evento.local} vs ${evento.visitante}`);
         break;
