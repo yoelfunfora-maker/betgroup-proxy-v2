@@ -998,8 +998,8 @@ app.post('/api/enriquecer', async (req, res) => {
 const HF_TOKEN = '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';
 const HF_MODELS = {
   analisis: 'moonshotai/Kimi-K2-Instruct-0905',   // análisis de apuestas
-  chat: 'meta-llama/Llama-3.1-70B-Instruct',      // soporte al usuario
-  rapido: 'mistralai/Mixtral-8x7B-Instruct-v0.1'  // procesamiento rápido
+  chat: 'meta-llama/Llama-3.3-70B-Instruct',      // soporte al usuario
+  rapido: 'mistralai/Mistral-Small-3.1-24B-Instruct-2503'  // procesamiento rápido
 };
 
 app.post('/api/huggingface', async (req, res) => {
