@@ -357,7 +357,6 @@ async function enriquecerConCuotas(eventos) {
     const sportKey = typeof sportKeyMap[evento.sport] === 'function' 
       ? sportKeyMap[evento.sport](evento.liga) 
       : sportKeyMap[evento.sport];
-    if (!sportKey) continue;
     if (!grupos[sportKey]) grupos[sportKey] = [];
     grupos[sportKey].push(evento);
   }
@@ -474,6 +473,12 @@ async function precalentarCache() {
     { path: 'baseball/mlb/scoreboard', sport: 'baseball' },
     { path: 'soccer/eng.1/scoreboard', sport: 'soccer' },
     { path: 'soccer/esp.1/scoreboard', sport: 'soccer' },
+    { path: 'soccer/ger.1/scoreboard', sport: 'soccer' },
+    { path: 'soccer/ita.1/scoreboard', sport: 'soccer' },
+    { path: 'soccer/fra.1/scoreboard', sport: 'soccer' },
+    { path: 'soccer/ned.1/scoreboard', sport: 'soccer' },
+    { path: 'soccer/por.1/scoreboard', sport: 'soccer' },
+    { path: 'soccer/usa.1/scoreboard', sport: 'soccer' },
     { path: 'tennis/wta/scoreboard', sport: 'tennis' },
     { path: 'mma/ufc/scoreboard', sport: 'mma' }
   ];
