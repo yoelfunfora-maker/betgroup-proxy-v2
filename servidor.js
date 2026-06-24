@@ -1104,34 +1104,38 @@ async function broadcastCuotasDiarias() {
 
     // Construir mensaje
     const fecha = new Date().toLocaleDateString('es-ES', { weekday: 'long', day: 'numeric', month: 'long' });
-    let msg = ;
-    msg += ;
-    msg += ;
+    let msg = '*BETGROUP PRO - CUOTAS DEL DIA*
+';
+    msg += '[' + fecha.toUpperCase() + ']
+';
+    msg += '------------------------
+
+';
 
     for (const ev of seleccion) {
       const iconos = { soccer: '⚽', basketball: '🏀', baseball: '⚾', mma: '🥊', tennis: '🎾' };
       const icono = iconos[ev.sport] || '🏅';
       const estado = ev.estado === 'live' ? '🔴 EN VIVO' : '🕐 PRÓXIMO';
 
-      msg += ;
-      msg += ;
+
+
 
       if (ev.cuota_local && ev.cuota_visitante) {
-        msg += ;
+  
         if (ev.cuota_empate) msg += ;
-        msg += ;
+  
       }
       if (ev.handicap_local) {
-        msg += ;
+  
       }
       if (ev.total_over_point) {
-        msg += ;
+  
       }
-      msg += ;
+
     }
 
-    msg += ;
-    msg += ;
+    msg += '------------------------\n';
+    msg += 'Apuesta en: https://betgroup-cuba-2024.web.app';
     msg += ;
 
     await notificarTelegram(msg);
