@@ -975,6 +975,22 @@ app.post('/api/admin/aplicar-codigo', async (req, res) => {
 
 setCache('fixtures', null);
 console.log('Caché de fixtures limpiado al inicio.');
+
+// ════ POST /api/enriquecer — Frontend envía eventos ESPN, backend agrega cuotas ════
+app.post('/api/enriquecer', async (req, res) => {
+  try {
+    const { eventos } = req.body;
+    if (!Array.isArray(eventos) || eventos.length === 0) {
+      return res.status(400).json({ error: 'Se requiere array de eventos' });
+    }
+    const enriquecidos = await enriquecerConCuotas(eventos);
+    res.json({ status: 'success', total: enriquecidos.length, data: enriquecidos });
+  } catch(err) {
+    console.error('Error /api/enriquecer:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 app.listen(PORT, () => {
   programarBroadcast();
   console.log(`✅ Proxy escuchando en puerto ${PORT}`);
