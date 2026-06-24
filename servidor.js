@@ -81,12 +81,8 @@ const ODDS_API_KEY_1 = process.env.ODDS_API_KEY_1 || '';
 const ODDS_API_KEY_2 = process.env.ODDS_API_KEY_2 || '';
 
 function getApiKey() {
-  const hour = new Date().getHours();
-  // Claves por defecto siempre disponibles
-  if (hour === 0 || hour === 8)  return 'e18abd8956512f34027f0ac3f87fbe52';
-  if (hour === 14 || hour === 18) return '0e31c3149f0afbb009491a0cd80169f4';
-  // Fuera de horario: devolver la clave más reciente para no parar el sistema
-  return '0e31c3149f0afbb009491a0cd80169f4';
+  // Clave fiable 24/7 (probada y funcional)
+  return 'e18abd8956512f34027f0ac3f87fbe52';
 }
 
 // ==================== ESPN FETCH ====================
