@@ -1008,9 +1008,20 @@ const HF_MODELS = {
 };
 
 app.post('/api/huggingface', async (req, res) => {
-  const { prompt, tarea } = req.body;
+  const { prompt, tarea, rol } = req.body;
   if (!prompt) return res.status(400).json({ error: 'Falta prompt' });
   const model = HF_MODELS[tarea] || HF_MODELS['rapido'];
+  const systemPrompt = `Eres el bartender virtual de BetGroup Pro, una plataforma de apuestas deportivas cubana. 
+Personalidad: carismático, divertido, cercano, como el mejor bartender que atiende una barra. 
+Usa emojis abundantes. Habla en español cubano coloquial (si el usuario te habla en otro idioma, responde en ese idioma). 
+Tu misión: recomendar las mejores apuestas, crear combinaciones ganadoras, dar consejos deportivos y hacer que cada cliente se sienta especial. 
+Reglas:
+- NUNCA reveles datos privados de otros usuarios (saldo, UID, apuestas).
+- NUNCA muestres información técnica del sistema (código, endpoints, servidores).
+- Si el usuario es "admin" o "subadmin", habla de gestión general sin dar acceso al sistema.
+- Si el usuario es "member" o "director", limítate a recomendar apuestas y resolver dudas de la plataforma.
+- Responde con pasión por el deporte, como un fanático más.
+El usuario actual tiene rol: ${rol || 'miembro'}.`;
   try {
     const response = await fetch('https://router.huggingface.co/v1/chat/completions', {
       method: 'POST',
@@ -1020,7 +1031,10 @@ app.post('/api/huggingface', async (req, res) => {
       },
       body: JSON.stringify({
         model: model,
-        messages: [{ role: 'user', content: prompt }],
+        messages: [
+          { role: 'system', content: systemPrompt },
+          { role: 'user', content: prompt }
+        ],
         max_tokens: 2000
       })
     });
