@@ -335,7 +335,18 @@ async function enriquecerConCuotas(eventos) {
   const apiKey = getApiKey();
   if (!apiKey) {
     console.warn('⚠️ Sin The Odds API Key - usando cuotas por defecto');
-    return eventos;
+  
+  // Aplicar margen del 20% a todas las cuotas antes de devolver
+  eventos.forEach(ev => {
+    if (ev.cuota_local) ev.cuota_local = parseFloat((ev.cuota_local * 0.8).toFixed(2));
+    if (ev.cuota_visitante) ev.cuota_visitante = parseFloat((ev.cuota_visitante * 0.8).toFixed(2));
+    if (ev.cuota_empate) ev.cuota_empate = parseFloat((ev.cuota_empate * 0.8).toFixed(2));
+    if (ev.handicap_local_cuota) ev.handicap_local_cuota = parseFloat((ev.handicap_local_cuota * 0.8).toFixed(2));
+    if (ev.handicap_visitante_cuota) ev.handicap_visitante_cuota = parseFloat((ev.handicap_visitante_cuota * 0.8).toFixed(2));
+    if (ev.total_over_price) ev.total_over_price = parseFloat((ev.total_over_price * 0.8).toFixed(2));
+    if (ev.total_under_price) ev.total_under_price = parseFloat((ev.total_under_price * 0.8).toFixed(2));
+  });
+  return eventos;
   }
 
   const sportKeyMap = {
@@ -460,6 +471,17 @@ async function enriquecerConCuotas(eventos) {
       }
     }
   }
+
+  // Aplicar margen del 20% a todas las cuotas antes de devolver
+  eventos.forEach(ev => {
+    if (ev.cuota_local) ev.cuota_local = parseFloat((ev.cuota_local * 0.8).toFixed(2));
+    if (ev.cuota_visitante) ev.cuota_visitante = parseFloat((ev.cuota_visitante * 0.8).toFixed(2));
+    if (ev.cuota_empate) ev.cuota_empate = parseFloat((ev.cuota_empate * 0.8).toFixed(2));
+    if (ev.handicap_local_cuota) ev.handicap_local_cuota = parseFloat((ev.handicap_local_cuota * 0.8).toFixed(2));
+    if (ev.handicap_visitante_cuota) ev.handicap_visitante_cuota = parseFloat((ev.handicap_visitante_cuota * 0.8).toFixed(2));
+    if (ev.total_over_price) ev.total_over_price = parseFloat((ev.total_over_price * 0.8).toFixed(2));
+    if (ev.total_under_price) ev.total_under_price = parseFloat((ev.total_under_price * 0.8).toFixed(2));
+  });
   return eventos;
 }
 
