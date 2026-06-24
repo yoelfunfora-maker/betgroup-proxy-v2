@@ -81,8 +81,12 @@ const ODDS_API_KEY_1 = process.env.ODDS_API_KEY_1 || '';
 const ODDS_API_KEY_2 = process.env.ODDS_API_KEY_2 || '';
 
 function getApiKey() {
-  // Clave fiable 24/7 (probada y funcional)
-  return 'e18abd8956512f34027f0ac3f87fbe52';
+  const hour = new Date().getHours();
+  // Claves por defecto siempre disponibles
+  if (hour === 0 || hour === 8)  return 'e18abd8956512f34027f0ac3f87fbe52';
+  if (hour === 14 || hour === 18) return '0e31c3149f0afbb009491a0cd80169f4';
+  // Fuera de horario: devolver la clave más reciente para no parar el sistema
+  return '0e31c3149f0afbb009491a0cd80169f4';
 }
 
 // ==================== ESPN FETCH ====================
@@ -506,25 +510,6 @@ async function precalentarCache() {
   setCache('fixtures', response);
   console.log(`✅ Caché precalentado: ${allEvents.length} eventos`);
 }
-
-
-// Middleware de logging para monitoreo
-app.use((req, res, next) => {
-  const start = Date.now();
-  res.on('finish', () => {
-    const duration = Date.now() - start;
-    console.log(`[MONITOR] ${req.method} ${req.path} → ${res.statusCode} (${duration}ms)`);
-    if (res.statusCode >= 500) {
-      const alerta = `🚨 ERROR ${res.statusCode} en ${req.method} ${req.path}\n⏱ ${duration}ms`;
-      fetch(`https://api.telegram.org/bot8671464180:AAHhu_Ct9-3Q6Arjle-7Xy4DyUGuuNvraBs/sendMessage`, {
-        method: 'POST',
-        headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({chat_id: '-5154764705', text: alerta})
-      }).catch(() => {});
-    }
-  });
-  next();
-});
 
 // ==================== ENDPOINTS ====================
 
@@ -990,24 +975,6 @@ app.post('/api/admin/aplicar-codigo', async (req, res) => {
 
 setCache('fixtures', null);
 console.log('Caché de fixtures limpiado al inicio.');
-setCache("fixtures", null);
-console.log("Caché de fixtures limpiado al inicio.");
-
-// ════ POST /api/enriquecer — Frontend envía eventos ESPN, backend agrega cuotas ════
-app.post('/api/enriquecer', async (req, res) => {
-  try {
-    const { eventos } = req.body;
-    if (!Array.isArray(eventos) || eventos.length === 0) {
-      return res.status(400).json({ error: 'Se requiere array de eventos' });
-    }
-    const enriquecidos = await enriquecerConCuotas(eventos);
-    res.json({ status: 'success', total: enriquecidos.length, data: enriquecidos });
-  } catch(err) {
-    console.error('Error /api/enriquecer:', err.message);
-    res.status(500).json({ error: err.message });
-  }
-});
-
 
 // ════ AGENTE UNIFICADO HUGGING FACE ════
 const HF_TOKEN = process.env.HF_TOKEN || '';
@@ -1032,13 +999,8 @@ app.post('/api/huggingface', async (req, res) => {
         const t = new Date(e.horaInicio).getTime();
         return t > ahora && t - ahora < 86400000;
       });
-      const futuros = todos.filter(e => {
-        const t = new Date(e.horaInicio).getTime();
-        return t > ahora + 86400000;
-      });
 
       let analisis = '\n📊 ANÁLISIS DEL BARTENDER:\n';
-      
       if (hoy.length > 0) {
         const porDeporte = {};
         for (const ev of hoy) {
@@ -1046,7 +1008,6 @@ app.post('/api/huggingface', async (req, res) => {
           if (!porDeporte[sp]) porDeporte[sp] = [];
           porDeporte[sp].push(ev);
         }
-        
         analisis += '🔥 EVENTOS DE HOY:\n';
         let todasLasCuotas = [];
         for (const [sport, evs] of Object.entries(porDeporte)) {
@@ -1060,11 +1021,9 @@ app.post('/api/huggingface', async (req, res) => {
             }
           }
         }
-        
         if (todasLasCuotas.length > 0) {
           const underdog = todasLasCuotas.reduce((a,b) => a.cuota_visitante > b.cuota_visitante ? a : b);
           analisis += `\n💎 JOYA DEL DÍA: ${underdog.visita} paga ${underdog.cuota_visitante} contra ${underdog.local}. ¡Batacazo potencial!\n`;
-          
           const seguras = todasLasCuotas.filter(e => e.cuota_local < 1.5).slice(0, 2);
           if (seguras.length >= 2) {
             const comb = (seguras[0].cuota_local * seguras[1].cuota_local).toFixed(2);
@@ -1074,20 +1033,6 @@ app.post('/api/huggingface', async (req, res) => {
       } else {
         analisis += '⚠️ NO HAY EVENTOS HOY. Pero puedo recomendarte los próximos.\n';
       }
-      
-      if (futuros.length > 0) {
-        const porDeporteF = {};
-        for (const ev of futuros) {
-          const sp = ev.sport || 'otro';
-          if (!porDeporteF[sp]) porDeporteF[sp] = [];
-          if (porDeporteF[sp].length < 3) porDeporteF[sp].push(ev);
-        }
-        analisis += '\n📅 PRÓXIMOS EVENTOS:\n';
-        for (const [sport, evs] of Object.entries(porDeporteF)) {
-          analisis += `${sport}: ${evs.map(e => e.local + ' vs ' + e.visitante).join(' | ')}\n`;
-        }
-      }
-      
       eventosReales = analisis + `\nReglas: Responde siempre en español cubano con emojis. Sé carismático. Recomienda basado en estos datos. Si no hay eventos HOY, dilo y ofrece los próximos. NO inventes información.`;
     }
   } catch(e) {}
@@ -1123,112 +1068,6 @@ El usuario actual tiene rol: ${rol || 'miembro'}.`;
     res.status(500).json({ error: 'Error al contactar Hugging Face' });
   }
 });
-    const data = await resp.json();
-    res.json({ reply: data?.choices?.[0]?.message?.content || JSON.stringify(data), model });
-  } catch(err) {
-    res.status(500).json({ error: 'Error al contactar Hugging Face' });
-  }
-});
-
-
-async function enviarReporteTelegram() {
-  try {
-    const resp = await axios.get('https://api.the-odds-api.com/v4/sports/soccer_epl/odds?apiKey=' + getApiKey() + '&markets=h2h&regions=us');
-    const eventos = resp.data || [];
-    let resumen = '';
-    for (const ev of eventos.slice(0, 5)) {
-      const cuotas = ev.bookmakers?.[0]?.markets?.[0]?.outcomes || [];
-      resumen += `${ev.home_team} vs ${ev.away_team}: ${cuotas.map(o => o.name + ' @ ' + o.price).join(' | ')}\n`;
-    }
-    const prompt = `Genera un reporte de apuestas para Telegram:\n${resumen}\nIncluye: mejores cuotas, combinación recomendada, curiosidad estadística. Usa emojis, español cubano.`;
-    const hfResp = await fetch('https://router.huggingface.co/v1/chat/completions', {
-      method: 'POST',
-      headers: { 'Authorization': `Bearer ${HF_TOKEN}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        model: 'moonshotai/Kimi-K2-Instruct-0905',
-        messages: [{ role: 'user', content: prompt }],
-        max_tokens: 1000
-      })
-    });
-    const hfData = await hfResp.json();
-    const mensaje = hfData?.choices?.[0]?.message?.content || 'Sin reporte.';
-    await fetch(`https://api.telegram.org/bot8671464180:AAHhu_Ct9-3Q6Arjle-7Xy4DyUGuuNvraBs/sendMessage`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ chat_id: '-5154764705', text: mensaje })
-    });
-    console.log('✅ Reporte enviado a Telegram.');
-  } catch(e) { console.error('Error reporte:', e.message); }
-}
-
-function programarReportes() {
-  const ahora = new Date();
-  const las8 = new Date(ahora).setHours(8, 0, 0, 0);
-  const las14 = new Date(ahora).setHours(14, 0, 0, 0);
-  const ms8 = las8 > ahora ? las8 - ahora : las8 - ahora + 86400000;
-  const ms14 = las14 > ahora ? las14 - ahora : las14 - ahora + 86400000;
-  setTimeout(() => { enviarReporteTelegram(); setInterval(enviarReporteTelegram, 6 * 3600000); }, Math.min(ms8, ms14));
-  console.log('📅 Reportes programados.');
-}
-programarReportes();
-
-
-// Endpoint de monitoreo: estado completo del sistema
-app.get('/api/estado-sistema', async (req, res) => {
-  const estado = {
-    timestamp: new Date().toISOString(),
-    proxy: 'online',
-    firebase: 'unknown',
-    odds_api: 'unknown',
-    espn: 'unknown',
-    huggingface: 'unknown'
-  };
-  try {
-    const fbSnap = await db.ref('.info/connected').once('value');
-    estado.firebase = fbSnap.val() === true ? 'online' : 'offline';
-  } catch(e) { estado.firebase = 'error: ' + e.message; }
-  try {
-    const oddsRes = await axios.get('https://api.the-odds-api.com/v4/sports/baseball_mlb/odds?apiKey=' + getApiKey() + '&markets=h2h&regions=us', {timeout: 5000});
-    estado.odds_api = oddsRes.data && oddsRes.data.length > 0 ? 'online' : 'sin_datos';
-  } catch(e) { estado.odds_api = 'error: ' + e.message; }
-  try {
-    const espnRes = await axios.get('https://site.api.espn.com/apis/site/v2/sports/baseball/mlb/scoreboard', {timeout: 5000});
-    estado.espn = espnRes.data && espnRes.data.events ? 'online' : 'sin_datos';
-  } catch(e) { estado.espn = 'error: ' + e.message; }
-  try {
-    const hfRes = await fetch('https://router.huggingface.co/v1/chat/completions', {
-      method: 'POST',
-      headers: {'Authorization': 'Bearer ' + (process.env.HF_TOKEN || ''), 'Content-Type': 'application/json'},
-      body: JSON.stringify({model: 'Qwen/Qwen2.5-7B-Instruct', messages: [{role: 'user', content: 'OK'}], max_tokens: 5})
-    });
-    estado.huggingface = hfRes.ok ? 'online' : 'error_' + hfRes.status;
-  } catch(e) { estado.huggingface = 'error: ' + e.message; }
-  res.json({ success: true, estado });
-});
-
-
-// Monitoreo automático diario (se ejecuta junto con el reporte de las 8 AM)
-async function monitoreoDiario() {
-  try {
-    const res = await axios.get('http://localhost:10000/api/estado-sistema');
-    const problemas = Object.entries(res.data.estado).filter(([k,v]) => v !== 'online' && k !== 'timestamp');
-    if (problemas.length > 0) {
-      const msg = '⚠️ ALERTA DE SISTEMA\n' + problemas.map(([k,v]) => `• ${k}: ${v}`).join('\n');
-      await fetch('https://api.telegram.org/bot8671464180:AAHhu_Ct9-3Q6Arjle-7Xy4DyUGuuNvraBs/sendMessage', {
-        method: 'POST',
-        headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({chat_id: '-5154764705', text: msg})
-      });
-    }
-  } catch(e) { console.error('Error en monitoreo:', e.message); }
-}
-// Ejecutar monitoreo junto con el reporte de las 8 AM
-const enviarReporteOriginal = enviarReporteTelegram;
-enviarReporteTelegram = async function() {
-  await enviarReporteOriginal();
-  await monitoreoDiario();
-};
-console.log('🛡️ Monitoreo diario vinculado al reporte de las 8 AM.');
 
 app.listen(PORT, () => {
   console.log(`✅ Proxy escuchando en puerto ${PORT}`);
