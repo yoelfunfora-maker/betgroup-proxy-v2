@@ -1072,94 +1072,76 @@ El usuario actual tiene rol: ${rol || 'miembro'}.`;
 
 // ══════════════════════════════════════════════════════════
 // BROADCAST DIARIO DE CUOTAS A TELEGRAM
-// Se ejecuta automáticamente a las 9:00 AM hora del servidor
-// ══════════════════════════════════════════════════════════
 async function broadcastCuotasDiarias() {
   try {
-    console.log('📢 Iniciando broadcast diario de cuotas a Telegram...');
-
-    // Obtener eventos del caché o esperar a que estén disponibles
+    console.log('Iniciando broadcast diario de cuotas a Telegram...');
     let fixtures = getCache('fixtures');
     if (!fixtures || !fixtures.data || fixtures.data.length === 0) {
-      console.log('⏳ Caché vacío, esperando 30s...');
       await new Promise(r => setTimeout(r, 30000));
       fixtures = getCache('fixtures');
     }
-
-    const eventos = fixtures?.data || [];
+    const eventos = fixtures && fixtures.data ? fixtures.data : [];
     if (eventos.length === 0) {
-      await notificarTelegram('⚠️ BetGroup Pro: No hay eventos disponibles hoy.');
+      await notificarTelegram('BetGroup Pro: No hay eventos disponibles hoy.');
       return;
     }
-
-    // Seleccionar hasta 5 eventos con cuotas reales
-    const conCuotas = eventos.filter(e => e.cuota_local && e.cuota_local > 0).slice(0, 5);
-    const sinCuotas = eventos.filter(e => !e.cuota_local || e.cuota_local === 0).slice(0, 3);
-    const seleccion = conCuotas.length > 0 ? conCuotas : sinCuotas;
-
-    if (seleccion.length === 0) {
-      await notificarTelegram('⚠️ BetGroup Pro: Eventos sin cuotas disponibles hoy.');
-      return;
-    }
-
-    // Construir mensaje
+    const conCuotas = eventos.filter(function(e){ return e.cuota_local && e.cuota_local > 0; }).slice(0, 5);
+    const seleccion = conCuotas.length > 0 ? conCuotas : eventos.slice(0, 3);
     const fecha = new Date().toLocaleDateString('es-ES', { weekday: 'long', day: 'numeric', month: 'long' });
-    let msg = '*BETGROUP PRO - CUOTAS DEL DIA*
+    let msg = '*BETGROUP PRO - CUOTAS DEL DIA*' + '
 ';
-    msg += '[' + fecha.toUpperCase() + ']
+    msg += fecha.toUpperCase() + '
 ';
-    msg += '------------------------
+    msg += '----------------------------
 
 ';
-
-    for (const ev of seleccion) {
-      const iconos = { soccer: '⚽', basketball: '🏀', baseball: '⚾', mma: '🥊', tennis: '🎾' };
-      const icono = iconos[ev.sport] || '🏅';
-      const estado = ev.estado === 'live' ? '🔴 EN VIVO' : '🕐 PRÓXIMO';
-
-
-
-
+    for (let i = 0; i < seleccion.length; i++) {
+      const ev = seleccion[i];
+      const deporte = (ev.sport || 'deporte').toUpperCase();
+      const estado = ev.estado === 'live' ? 'EN VIVO' : 'PROXIMO';
+      msg += (i + 1) + '. *' + ev.local + '* vs *' + ev.visitante + '*
+';
+      msg += deporte + ' | ' + (ev.liga || '') + ' | ' + estado + '
+';
       if (ev.cuota_local && ev.cuota_visitante) {
-  
-        if (ev.cuota_empate) msg += ;
-  
+        msg += '1:' + ev.cuota_local + ' ';
+        if (ev.cuota_empate) msg += 'X:' + ev.cuota_empate + ' ';
+        msg += '2:' + ev.cuota_visitante + '
+';
       }
       if (ev.handicap_local) {
-  
+        msg += 'Handicap: ' + ev.handicap_local + ' (' + (ev.handicap_local_cuota || '-') + ')
+';
       }
       if (ev.total_over_point) {
-  
+        msg += 'Over ' + ev.total_over_point + ':' + ev.total_over_price + ' / Under:' + ev.total_under_price + '
+';
       }
-
+      msg += '
+';
     }
-
-    msg += '------------------------\n';
+    msg += '----------------------------
+';
     msg += 'Apuesta en: https://betgroup-cuba-2024.web.app';
-    msg += ;
-
     await notificarTelegram(msg);
-    console.log('✅ Broadcast diario enviado a Telegram.');
-
+    console.log('Broadcast diario enviado a Telegram OK.');
   } catch(err) {
-    console.error('❌ Error en broadcast diario:', err.message);
+    console.error('Error en broadcast diario:', err.message);
   }
 }
 
-// Programar broadcast diario a las 9:00 AM UTC
 function programarBroadcast() {
   const ahora = new Date();
-  const manana9am = new Date();
-  manana9am.setUTCHours(13, 0, 0, 0); // 9am Cuba = 13:00 UTC
-  if (manana9am <= ahora) manana9am.setUTCDate(manana9am.getUTCDate() + 1);
-  const msHasta9am = manana9am - ahora;
-  console.log(`⏰ Próximo broadcast en ${Math.round(msHasta9am/60000)} minutos`);
-  setTimeout(() => {
+  const proxima = new Date();
+  proxima.setUTCHours(13, 0, 0, 0);
+  if (proxima <= ahora) proxima.setUTCDate(proxima.getUTCDate() + 1);
+  const ms = proxima - ahora;
+  console.log('Proximo broadcast en ' + Math.round(ms / 60000) + ' minutos');
+  setTimeout(function() {
     broadcastCuotasDiarias();
-    setInterval(broadcastCuotasDiarias, 24 * 60 * 60 * 1000); // cada 24h
-  }, msHasta9am);
+    setInterval(broadcastCuotasDiarias, 24 * 60 * 60 * 1000);
+  }, ms);
 }
-
 
 app.listen(PORT, () => {
   programarBroadcast(); // Activar broadcast diario Telegram
