@@ -1186,6 +1186,17 @@ function programarReportes() {
 }
 programarReportes();
 
+
+app.post('/api/recargar-cache', async (req, res) => {
+  res.json({ status: 'recargando', message: 'Forzando precalentarCache...' });
+  try {
+    await precalentarCache();
+    console.log('✅ Cache regenerado manualmente.');
+  } catch(e) {
+    console.error('Error en recarga:', e.message);
+  }
+});
+
 app.listen(PORT, () => {
   console.log(`✅ Proxy escuchando en puerto ${PORT}`);
   precalentarCache();
