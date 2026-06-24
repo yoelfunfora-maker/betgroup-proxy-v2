@@ -1069,6 +1069,99 @@ El usuario actual tiene rol: ${rol || 'miembro'}.`;
   }
 });
 
+
+// ════ POST /api/enriquecer ════
+app.post('/api/enriquecer', async (req, res) => {
+  try {
+    const { eventos } = req.body;
+    if (!Array.isArray(eventos) || eventos.length === 0) {
+      return res.status(400).json({ error: 'Se requiere array de eventos' });
+    }
+    const enriquecidos = await enriquecerConCuotas(eventos);
+    res.json({ status: 'success', total: enriquecidos.length, data: enriquecidos });
+  } catch(err) {
+    console.error('Error /api/enriquecer:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+
+// ════ REPORTES AUTOMÁTICOS A TELEGRAM ════
+async function enviarReporteTelegram() {
+  try {
+    const resp = await axios.get('https://api.the-odds-api.com/v4/sports/soccer_epl/odds?apiKey=' + getApiKey() + '&markets=h2h&regions=us');
+    const eventos = resp.data || [];
+    let resumen = '';
+    for (const ev of eventos.slice(0, 5)) {
+      const cuotas = ev.bookmakers?.[0]?.markets?.[0]?.outcomes || [];
+      resumen += `${ev.home_team} vs ${ev.away_team}: ${cuotas.map(o => o.name + ' @ ' + o.price).join(' | ')}\n`;
+    }
+    const prompt = `Genera un reporte de apuestas para Telegram:\n${resumen}\nIncluye: mejores cuotas, combinación recomendada, curiosidad estadística. Usa emojis, español cubano.`;
+    const hfResp = await fetch('https://router.huggingface.co/v1/chat/completions', {
+      method: 'POST',
+      headers: { 'Authorization': `Bearer ${HF_TOKEN}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        model: 'moonshotai/Kimi-K2-Instruct-0905',
+        messages: [{ role: 'user', content: prompt }],
+        max_tokens: 1000
+      })
+    });
+    const hfData = await hfResp.json();
+    const mensaje = hfData?.choices?.[0]?.message?.content || 'Sin reporte.';
+    await fetch(`https://api.telegram.org/bot8671464180:AAHhu_Ct9-3Q6Arjle-7Xy4DyUGuuNvraBs/sendMessage`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ chat_id: '-5154764705', text: mensaje })
+    });
+    console.log('✅ Reporte enviado a Telegram.');
+  } catch(e) { console.error('Error reporte:', e.message); }
+}
+
+function programarReportes() {
+  const ahora = new Date();
+  const las8 = new Date(ahora).setHours(8, 0, 0, 0);
+  const las14 = new Date(ahora).setHours(14, 0, 0, 0);
+  const ms8 = las8 > ahora ? las8 - ahora : las8 - ahora + 86400000;
+  const ms14 = las14 > ahora ? las14 - ahora : las14 - ahora + 86400000;
+  setTimeout(() => { enviarReporteTelegram(); setInterval(enviarReporteTelegram, 6 * 3600000); }, Math.min(ms8, ms14));
+  console.log('📅 Reportes programados a las 8 AM y 2 PM.');
+}
+programarReportes();
+
+
+// ════ MONITOREO DEL SISTEMA ════
+app.get('/api/estado-sistema', async (req, res) => {
+  const estado = {
+    timestamp: new Date().toISOString(),
+    proxy: 'online',
+    firebase: 'unknown',
+    odds_api: 'unknown',
+    espn: 'unknown',
+    huggingface: 'unknown'
+  };
+  try {
+    const fbSnap = await db.ref('.info/connected').once('value');
+    estado.firebase = fbSnap.val() === true ? 'online' : 'offline';
+  } catch(e) { estado.firebase = 'error: ' + e.message; }
+  try {
+    const oddsRes = await axios.get('https://api.the-odds-api.com/v4/sports/baseball_mlb/odds?apiKey=' + getApiKey() + '&markets=h2h&regions=us', {timeout: 5000});
+    estado.odds_api = oddsRes.data && oddsRes.data.length > 0 ? 'online' : 'sin_datos';
+  } catch(e) { estado.odds_api = 'error: ' + e.message; }
+  try {
+    const espnRes = await axios.get('https://site.api.espn.com/apis/site/v2/sports/baseball/mlb/scoreboard', {timeout: 5000});
+    estado.espn = espnRes.data && espnRes.data.events ? 'online' : 'sin_datos';
+  } catch(e) { estado.espn = 'error: ' + e.message; }
+  try {
+    const hfRes = await fetch('https://router.huggingface.co/v1/chat/completions', {
+      method: 'POST',
+      headers: {'Authorization': 'Bearer ' + (process.env.HF_TOKEN || ''), 'Content-Type': 'application/json'},
+      body: JSON.stringify({model: 'Qwen/Qwen2.5-7B-Instruct', messages: [{role: 'user', content: 'OK'}], max_tokens: 5})
+    });
+    estado.huggingface = hfRes.ok ? 'online' : 'error_' + hfRes.status;
+  } catch(e) { estado.huggingface = 'error: ' + e.message; }
+  res.json({ success: true, estado });
+});
+
 app.listen(PORT, () => {
   console.log(`✅ Proxy escuchando en puerto ${PORT}`);
   precalentarCache();
