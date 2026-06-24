@@ -326,17 +326,7 @@ function coincideEquipo(evento, game) {
     );
   }
 
-  let score = Math.max(scoreDirecto, scoreCruzado);
-  // Si el score es bajo, intentar solo con Sørensen-Dice (más permisivo)
-  if (score < 0.70) {
-    const localL = limpiarNombre(evento.local || '');
-    const visitL = limpiarNombre(evento.visitante || '');
-    const homeL = limpiarNombre(game.home_team || '');
-    const awayL = limpiarNombre(game.away_team || '');
-    const diceDirecto = Math.max(sorensenDice(localL, homeL), sorensenDice(visitL, awayL));
-    const diceCruzado = Math.max(sorensenDice(localL, awayL), sorensenDice(visitL, homeL));
-    score = Math.max(score, diceDirecto, diceCruzado);
-  }
+  const score = Math.max(scoreDirecto, scoreCruzado);
   return { score, esCruzado: scoreCruzado > scoreDirecto };
 }
 // ==================== FIN FUNCIONES DE SIMILITUD ====================
@@ -424,7 +414,7 @@ async function enriquecerConCuotas(eventos) {
     for (const evento of eventosGrupo) {
       for (const game of juegos) {
         const { score, esCruzado } = coincideEquipo(evento, game);
-        if (score < 0.70) continue;
+        if (score < 0.82) continue;
 
         const bookmakers = game.bookmakers?.[0];
         if (!bookmakers?.markets) continue;
@@ -1018,44 +1008,9 @@ const HF_MODELS = {
 };
 
 app.post('/api/huggingface', async (req, res) => {
-  const { prompt, tarea, rol } = req.body;
+  const { prompt, tarea } = req.body;
   if (!prompt) return res.status(400).json({ error: 'Falta prompt' });
   const model = HF_MODELS[tarea] || HF_MODELS['rapido'];
-  
-  // Obtener eventos reales del sistema
-  let eventosReales = '';
-  try {
-    const fixturesCache = getCache('fixtures');
-    if (fixturesCache && fixturesCache.data && fixturesCache.data.length > 0) {
-      const eventos = fixturesCache.data;
-      const deportesActivos = [...new Set(eventos.map(e => e.sport))].join(', ');
-      eventosReales = '\n\n📋 EVENTOS DISPONIBLES AHORA EN BETGROUP:\n';
-      eventosReales += `Deportes activos: ${deportesActivos}. SOLO recomiendes apuestas de estos deportes. NO menciones baloncesto, NFL, hockey ni otros deportes que no estén en esta lista.\n`;
-      for (const ev of eventos.slice(0, 15)) {
-        eventosReales += `⚽ ${ev.local} vs ${ev.visitante} | ${ev.sport} | ${ev.horaInicio || 'sin hora'} | cuota_local: ${ev.cuota_local || 'N/D'} | cuota_visitante: ${ev.cuota_visitante || 'N/D'} | cuota_empate: ${ev.cuota_empate || 'N/D'}\n`;
-      }
-    } else {
-      eventosReales = '\n\n⚠️ No hay eventos disponibles en este momento. Dile al usuario que vuelva más tarde.\n';
-    }
-  } catch(e) {
-    eventosReales = '\n\n⚠️ No se pudieron cargar los eventos. Pide disculpas al usuario.\n';
-  }
-
-  const systemPrompt = `Eres el bartender virtual de BetGroup Pro, una plataforma de apuestas deportivas cubana. 
-Personalidad: carismático, divertido, cercano, como el mejor bartender que atiende una barra. 
-Usa emojis abundantes. Habla en español cubano coloquial (si el usuario te habla en otro idioma, responde en ese idioma). 
-Tu misión: recomendar las mejores apuestas usando SOLO los eventos reales del sistema que se te proporcionan. Puedes buscar estadísticas en la web para enriquecer tus recomendaciones, pero siempre basado en los eventos de BetGroup.
-${eventosReales}
-Reglas:
-- SOLO recomiendes apuestas de los eventos que aparecen en la lista de arriba. NUNCA inventes eventos ni deportes.
-- NUNCA menciones baloncesto, NFL, hockey ni cualquier deporte que no esté en la lista de deportes activos.
-- Si te preguntan por un deporte que no está en la lista, responde que no hay eventos disponibles de ese deporte.
-- NUNCA reveles datos privados de otros usuarios (saldo, UID, apuestas).
-- NUNCA muestres información técnica del sistema (código, endpoints, servidores).
-- Si el usuario es "admin" o "subadmin", habla de gestión general sin dar acceso al sistema.
-- Si el usuario es "member" o "director", limítate a recomendar apuestas y resolver dudas de la plataforma.
-- Responde con pasión por el deporte, como un fanático más.
-El usuario actual tiene rol: ${rol || 'miembro'}.`;
   try {
     const response = await fetch('https://router.huggingface.co/v1/chat/completions', {
       method: 'POST',
@@ -1065,11 +1020,8 @@ El usuario actual tiene rol: ${rol || 'miembro'}.`;
       },
       body: JSON.stringify({
         model: model,
-        messages: [
-          { role: 'system', content: systemPrompt },
-          { role: 'user', content: prompt }
-        ],
-        max_tokens: 2000
+        messages: [{ role: 'user', content: prompt }],
+        max_tokens: 500
       })
     });
     const data = await response.json();
@@ -1078,122 +1030,6 @@ El usuario actual tiene rol: ${rol || 'miembro'}.`;
   } catch(err) {
     console.error('Hugging Face error:', err.message);
     res.status(500).json({ error: 'Error al contactar Hugging Face' });
-  }
-});
-
-
-// Endpoint para limpiar el caché manualmente
-app.post('/api/clear-cache', async (req, res) => {
-  setCache('fixtures', null);
-  console.log('Caché de fixtures limpiado manualmente.');
-  res.json({ status: 'ok', message: 'Caché limpiado' });
-});
-
-
-// Monitoreo diario a las 8 AM
-function programarReporteDiario() {
-  const ahora = new Date();
-  const las8 = new Date(ahora);
-  las8.setHours(8, 0, 0, 0);
-  if (ahora > las8) las8.setDate(las8.getDate() + 1);
-  const msHastaLas8 = las8 - ahora;
-  setTimeout(() => {
-    setInterval(async () => {
-      try {
-        const res = await axios.get('https://betgroup-proxy-v2-8vqj.onrender.com/api/health');
-        const msg = `BetGroup Pro – Reporte Diario\n` +
-          `Fecha: ${new Date().toLocaleDateString('es-CU')}\n` +
-          `Estado: ${res.data.status}\n` +
-          `Eventos activos: ${res.data.total || 'N/D'}\n` +
-          `Agente IA: Hugging Face operativo`;
-        await fetch(`https://api.telegram.org/bot8671464180:AAHhu_Ct9-3Q6Arjle-7Xy4DyUGuuNvraBs/sendMessage`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ chat_id: '-5154764705', text: msg })
-        });
-        console.log('Reporte diario enviado a Telegram.');
-      } catch(e) {
-        console.error('Error en reporte diario:', e.message);
-      }
-    }, 24 * 60 * 60 * 1000);
-  }, msHastaLas8);
-  console.log(`Reporte diario programado para las 8 AM (en ${Math.round(msHastaLas8 / 3600000)} horas).`);
-}
-programarReporteDiario();
-
-
-// ==================== REPORTES AUTOMÁTICOS A TELEGRAM ====================
-async function enviarReporteTelegram() {
-  try {
-    const deportes = ['soccer_epl', 'basketball_nba', 'baseball_mlb', 'tennis_atp_wimbledon', 'mma_mixed_martial_arts'];
-    let resumen = '';
-    for (const sport of deportes) {
-      const url = `https://api.the-odds-api.com/v4/sports/${sport}/odds?apiKey=${getApiKey()}&markets=h2h&regions=us`;
-      const resp = await axios.get(url, { timeout: 5000 });
-      const eventos = resp.data || [];
-      if (eventos.length > 0) {
-        const mejores = eventos.slice(0, 2);
-        resumen += `\n🏆 ${sport.replace(/_/g, ' ').toUpperCase()}:\n`;
-        for (const ev of mejores) {
-          const cuotas = ev.bookmakers?.[0]?.markets?.[0]?.outcomes || [];
-          resumen += `  ${ev.home_team} vs ${ev.away_team}: ${cuotas.map(o => o.name + ' @ ' + o.price).join(' | ')}\n`;
-        }
-      }
-    }
-    const prompt = `Genera un reporte de apuestas para Telegram con estos datos:\n${resumen}\nIncluye: mejores cuotas, combinación recomendada (2 o 3 partidos), curiosidad estadística del día. Usa emojis, sé carismático, en español cubano. Máximo 1000 caracteres.`;
-    const hfResp = await fetch('https://router.huggingface.co/v1/chat/completions', {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${HF_TOKEN}`,
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify({
-        model: 'moonshotai/Kimi-K2-Instruct-0905',
-        messages: [
-          { role: 'system', content: 'Eres el bartender de BetGroup Pro. Responde en español cubano con emojis.' },
-          { role: 'user', content: prompt }
-        ],
-        max_tokens: 1000
-      })
-    });
-    const hfData = await hfResp.json();
-    const mensaje = hfData?.choices?.[0]?.message?.content || 'Sin reporte disponible.';
-    await fetch(`https://api.telegram.org/bot8671464180:AAHhu_Ct9-3Q6Arjle-7Xy4DyUGuuNvraBs/sendMessage`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ chat_id: '-5154764705', text: mensaje, parse_mode: 'HTML' })
-    });
-    console.log('✅ Reporte enviado a Telegram.');
-  } catch(e) {
-    console.error('Error en reporte:', e.message);
-  }
-}
-
-function programarReportes() {
-  const ahora = new Date();
-  const hora = ahora.getHours();
-  if (hora < 8) {
-    const ms = new Date(ahora).setHours(8, 0, 0, 0) - ahora;
-    setTimeout(() => { enviarReporteTelegram(); setInterval(enviarReporteTelegram, 6 * 60 * 60 * 1000); }, ms);
-  } else if (hora < 14) {
-    const ms = new Date(ahora).setHours(14, 0, 0, 0) - ahora;
-    setTimeout(() => { enviarReporteTelegram(); setInterval(enviarReporteTelegram, 6 * 60 * 60 * 1000); }, ms);
-  } else {
-    const ms = new Date(ahora).setHours(8, 0, 0, 0) - ahora + 24 * 60 * 60 * 1000;
-    setTimeout(() => { enviarReporteTelegram(); setInterval(enviarReporteTelegram, 6 * 60 * 60 * 1000); }, ms);
-  }
-  console.log('📅 Reportes programados a las 8 AM y 2 PM.');
-}
-programarReportes();
-
-
-app.post('/api/recargar-cache', async (req, res) => {
-  res.json({ status: 'recargando', message: 'Forzando precalentarCache...' });
-  try {
-    await precalentarCache();
-    console.log('✅ Cache regenerado manualmente.');
-  } catch(e) {
-    console.error('Error en recarga:', e.message);
   }
 });
 
