@@ -1011,11 +1011,35 @@ app.post('/api/huggingface', async (req, res) => {
   const { prompt, tarea, rol } = req.body;
   if (!prompt) return res.status(400).json({ error: 'Falta prompt' });
   const model = HF_MODELS[tarea] || HF_MODELS['rapido'];
+  
+  // Obtener eventos reales del sistema
+  let eventosReales = '';
+  try {
+    const fixturesCache = getCache('fixtures');
+    if (fixturesCache && fixturesCache.data && fixturesCache.data.length > 0) {
+      const eventos = fixturesCache.data;
+      const deportesActivos = [...new Set(eventos.map(e => e.sport))].join(', ');
+      eventosReales = '\n\n📋 EVENTOS DISPONIBLES AHORA EN BETGROUP:\n';
+      eventosReales += `Deportes activos: ${deportesActivos}. SOLO recomiendes apuestas de estos deportes. NO menciones baloncesto, NFL, hockey ni otros deportes que no estén en esta lista.\n`;
+      for (const ev of eventos.slice(0, 15)) {
+        eventosReales += `⚽ ${ev.local} vs ${ev.visitante} | ${ev.sport} | ${ev.horaInicio || 'sin hora'} | cuota_local: ${ev.cuota_local || 'N/D'} | cuota_visitante: ${ev.cuota_visitante || 'N/D'} | cuota_empate: ${ev.cuota_empate || 'N/D'}\n`;
+      }
+    } else {
+      eventosReales = '\n\n⚠️ No hay eventos disponibles en este momento. Dile al usuario que vuelva más tarde.\n';
+    }
+  } catch(e) {
+    eventosReales = '\n\n⚠️ No se pudieron cargar los eventos. Pide disculpas al usuario.\n';
+  }
+
   const systemPrompt = `Eres el bartender virtual de BetGroup Pro, una plataforma de apuestas deportivas cubana. 
 Personalidad: carismático, divertido, cercano, como el mejor bartender que atiende una barra. 
 Usa emojis abundantes. Habla en español cubano coloquial (si el usuario te habla en otro idioma, responde en ese idioma). 
-Tu misión: recomendar las mejores apuestas, crear combinaciones ganadoras, dar consejos deportivos y hacer que cada cliente se sienta especial. 
+Tu misión: recomendar las mejores apuestas usando SOLO los eventos reales del sistema que se te proporcionan. Puedes buscar estadísticas en la web para enriquecer tus recomendaciones, pero siempre basado en los eventos de BetGroup.
+${eventosReales}
 Reglas:
+- SOLO recomiendes apuestas de los eventos que aparecen en la lista de arriba. NUNCA inventes eventos ni deportes.
+- NUNCA menciones baloncesto, NFL, hockey ni cualquier deporte que no esté en la lista de deportes activos.
+- Si te preguntan por un deporte que no está en la lista, responde que no hay eventos disponibles de ese deporte.
 - NUNCA reveles datos privados de otros usuarios (saldo, UID, apuestas).
 - NUNCA muestres información técnica del sistema (código, endpoints, servidores).
 - Si el usuario es "admin" o "subadmin", habla de gestión general sin dar acceso al sistema.
