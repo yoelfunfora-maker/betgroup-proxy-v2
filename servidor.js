@@ -341,8 +341,8 @@ async function enriquecerConCuotas(eventos) {
   const sportKeyMap = {
     'soccer': (liga) => {
     const l = (liga || '').toLowerCase();
-    if (l.includes('world') || l.includes('copa') || l.includes('fifa')) return 'soccer_epl';
-    if (l.includes('friendly') || l.includes('amistoso')) return 'soccer_spain_la_liga';
+    if (l.includes('world') || l.includes('copa') || l.includes('fifa')) return 'soccer_fifa_world_cup';
+    if (l.includes('friendly') || l.includes('amistoso')) return 'soccer_international_friendly';
     return 'soccer_epl';
   },
     'basketball': 'basketball_nba',
@@ -357,6 +357,7 @@ async function enriquecerConCuotas(eventos) {
     const sportKey = typeof sportKeyMap[evento.sport] === 'function' 
       ? sportKeyMap[evento.sport](evento.liga) 
       : sportKeyMap[evento.sport];
+    if (!sportKey) continue;
     if (!grupos[sportKey]) grupos[sportKey] = [];
     grupos[sportKey].push(evento);
   }
@@ -471,14 +472,8 @@ async function precalentarCache() {
   const deportes = [
     { path: 'basketball/nba/scoreboard', sport: 'basketball' },
     { path: 'baseball/mlb/scoreboard', sport: 'baseball' },
-    { path: 'soccer/eng.1/scoreboard', sport: 'soccer' },
-    { path: 'soccer/esp.1/scoreboard', sport: 'soccer' },
-    { path: 'soccer/ger.1/scoreboard', sport: 'soccer' },
-    { path: 'soccer/ita.1/scoreboard', sport: 'soccer' },
-    { path: 'soccer/fra.1/scoreboard', sport: 'soccer' },
-    { path: 'soccer/ned.1/scoreboard', sport: 'soccer' },
-    { path: 'soccer/por.1/scoreboard', sport: 'soccer' },
-    { path: 'soccer/usa.1/scoreboard', sport: 'soccer' },
+    { path: 'soccer/fifa.friendly/scoreboard', sport: 'soccer' },
+    { path: 'soccer/fifa.world/scoreboard', sport: 'soccer' },
     { path: 'tennis/wta/scoreboard', sport: 'tennis' },
     { path: 'mma/ufc/scoreboard', sport: 'mma' }
   ];
@@ -496,11 +491,11 @@ async function precalentarCache() {
   }
 
   await enriquecerConCuotas(allEvents);
-// [HF]   // Si las cuotas no se obtuvieron, usar Athos
+  // Si las cuotas no se obtuvieron, usar Athos
   const sinCuotas = allEvents.filter(e => !e.cuota_local || e.cuota_local <= 1.0);
   if (sinCuotas.length > 0) {
-// [HF]     console.log(`Athos buscando cuotas para ${sinCuotas.length} eventos...`);
-// [HF]     // Athos eliminado - el sistema usa solo The Odds API
+    console.log(`Athos buscando cuotas para ${sinCuotas.length} eventos...`);
+    // Athos eliminado - el sistema usa solo The Odds API
   }
 
   const response = {
@@ -642,7 +637,7 @@ app.get('/api/agents-status', async (req, res) => {
   const GROQ_B64 = 'Z3NrX05rU01oNlBxdm9qdElnNTlrT1QyV0dkeWIzRlkwc3dDYVZHYzRGa055ZFV6OGZYcjl0SXc=';
   const geminiKey = Buffer.from(GEMINI_B64, 'base64').toString();
   const groqKey   = Buffer.from(GROQ_B64, 'base64').toString();
-// [HF]   const status = { Geminis02: 'unknown', Agente_groc01: 'unknown', Athos_Tavily: 'unknown' };
+  const status = { Geminis02: 'unknown', Agente_groc01: 'unknown', Athos_Tavily: 'unknown' };
 
   if (geminiKey) {
     try {
@@ -666,8 +661,8 @@ app.get('/api/agents-status', async (req, res) => {
     } catch(e) { status.Agente_groc01 = 'error: ' + e.message; }
   } else { status.Agente_groc01 = 'no_key'; }
 
-// [HF]   const tavilyKey = process.env.TAVILY_API_KEY;
-// [HF]   status.Athos_Tavily = tavilyKey ? 'configured' : 'no_key';
+  const tavilyKey = process.env.TAVILY_API_KEY;
+  status.Athos_Tavily = tavilyKey ? 'configured' : 'no_key';
   res.json({ success: true, agents: status, timestamp: new Date().toISOString() });
 });
 
@@ -980,59 +975,6 @@ app.post('/api/admin/aplicar-codigo', async (req, res) => {
 
 setCache('fixtures', null);
 console.log('Caché de fixtures limpiado al inicio.');
-setCache("fixtures", null);
-console.log("Caché de fixtures limpiado al inicio.");
-
-// ════ POST /api/enriquecer — Frontend envía eventos ESPN, backend agrega cuotas ════
-app.post('/api/enriquecer', async (req, res) => {
-  try {
-    const { eventos } = req.body;
-    if (!Array.isArray(eventos) || eventos.length === 0) {
-      return res.status(400).json({ error: 'Se requiere array de eventos' });
-    }
-    const enriquecidos = await enriquecerConCuotas(eventos);
-    res.json({ status: 'success', total: enriquecidos.length, data: enriquecidos });
-  } catch(err) {
-    console.error('Error /api/enriquecer:', err.message);
-    res.status(500).json({ error: err.message });
-  }
-});
-
-
-// ════ AGENTE UNIFICADO HUGGING FACE ════
-const HF_TOKEN = process.env.HF_TOKEN || '';
-const HF_MODELS = {
-  analisis: 'moonshotai/Kimi-K2-Instruct-0905',   // análisis de apuestas
-  chat: 'meta-llama/Llama-3.3-70B-Instruct',      // soporte al usuario
-  rapido: 'Qwen/Qwen2.5-7B-Instruct'  // procesamiento rápido
-};
-
-app.post('/api/huggingface', async (req, res) => {
-  const { prompt, tarea } = req.body;
-  if (!prompt) return res.status(400).json({ error: 'Falta prompt' });
-  const model = HF_MODELS[tarea] || HF_MODELS['rapido'];
-  try {
-    const response = await fetch('https://router.huggingface.co/v1/chat/completions', {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${HF_TOKEN}`,
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify({
-        model: model,
-        messages: [{ role: 'user', content: prompt }],
-        max_tokens: 500
-      })
-    });
-    const data = await response.json();
-    const reply = data?.choices?.[0]?.message?.content || JSON.stringify(data);
-    res.json({ reply, model });
-  } catch(err) {
-    console.error('Hugging Face error:', err.message);
-    res.status(500).json({ error: 'Error al contactar Hugging Face' });
-  }
-});
-
 app.listen(PORT, () => {
   console.log(`✅ Proxy escuchando en puerto ${PORT}`);
   precalentarCache();
