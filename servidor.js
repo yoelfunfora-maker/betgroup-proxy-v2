@@ -790,98 +790,98 @@ async function notificarTelegram(texto) {
   } catch(e) { console.error('Error notificando a Telegram:', e.message); }
 }
 
-// [OBSOLETO] app.get('/api/verificacion-geminis', async (req, res) => {
+// [OBSOLETO] // [OBSOLETO] app.get('/api/verificacion-geminis', async (req, res) => {
+// [OBSOLETO] // [OBSOLETO]   try {
+// [OBSOLETO] // [OBSOLETO]     const estado = { proxy: 'ok', agentes: {}, eventos: 0, chatbot: false, saldo_firebase: null, saldo_endpoint: null };
+// [OBSOLETO] // [OBSOLETO]     
+// [OBSOLETO] // [OBSOLETO]     const [agentsResp, fixturesResp, chatResp, saldoFB, saldoEP] = await Promise.allSettled([
+// [OBSOLETO] // [OBSOLETO]       axios.get('https://betgroup-proxy-v2.onrender.com/api/agents-status', { timeout: 3000 }),
+// [OBSOLETO] // [OBSOLETO]       axios.get('https://betgroup-proxy-v2.onrender.com/api/fixtures', { timeout: 3000 }),
+// [OBSOLETO] // [OBSOLETO]       axios.post('https://betgroup-proxy-v2.onrender.com/api/chat', { mensaje: 'Test' }, { timeout: 3000 }),
+// [OBSOLETO] // [OBSOLETO]       db.ref('users/BG_mq7rch3t_h6sjfs1h/creditoReal').once('value'),
+// [OBSOLETO] // [OBSOLETO]       axios.get('https://betgroup-proxy-v2.onrender.com/api/saldo/BG_mq7rch3t_h6sjfs1h', { timeout: 3000 })
+// [OBSOLETO] // [OBSOLETO]     ]);
+// [OBSOLETO] // [OBSOLETO] 
+// [OBSOLETO] // [OBSOLETO]     if (agentsResp.status === 'fulfilled') estado.agentes = agentsResp.value.data?.agents || {};
+// [OBSOLETO] // [OBSOLETO]     if (fixturesResp.status === 'fulfilled') estado.eventos = fixturesResp.value.data?.total || 0;
+// [OBSOLETO] // [OBSOLETO]     if (chatResp.status === 'fulfilled') estado.chatbot = chatResp.value.data?.success || false;
+// [OBSOLETO] // [OBSOLETO]     if (saldoFB.status === 'fulfilled') estado.saldo_firebase = saldoFB.value.val();
+// [OBSOLETO] // [OBSOLETO]     if (saldoEP.status === 'fulfilled') estado.saldo_endpoint = saldoEP.value.data?.creditoReal;
+// [OBSOLETO] // [OBSOLETO] 
+// [OBSOLETO] // [OBSOLETO]     // Formato exacto del curl funcional
+// [OBSOLETO] // [OBSOLETO]     const geminiKey = 'AQ.Ab8RN6ISClY4ZsjItifSBivdyJinPc1Gh4Ic1BF3cqstAV4lkg';
+// [OBSOLETO] // [OBSOLETO]     let informe = 'Sistema operativo. Saldo Firebase: ' + estado.saldo_firebase + ' | Saldo endpoint: ' + estado.saldo_endpoint;
+// [OBSOLETO] // [OBSOLETO]     
+// [OBSOLETO] // [OBSOLETO]     try {
+// [OBSOLETO] // [OBSOLETO]       const resp = await axios.post(
+// [OBSOLETO] // [OBSOLETO]         'https://generativelanguage.googleapis.com/v1beta/models/gemini-flash-latest:generateContent',
+// [OBSOLETO] // [OBSOLETO]         { contents: [{ parts: [{ text: 'Eres el verificador de BetGroup Pro. Datos del sistema: ' + JSON.stringify(estado) + '. Genera un informe breve en 2 frases.' }] }] },
+// [OBSOLETO] // [OBSOLETO]         { headers: { 'X-goog-api-key': geminiKey, 'Content-Type': 'application/json' }, timeout: 8000 }
+// [OBSOLETO] // [OBSOLETO]       );
+// [OBSOLETO] // [OBSOLETO]       if (resp.data?.candidates?.[0]?.content?.parts?.[0]?.text) {
+// [OBSOLETO] // [OBSOLETO]         informe = resp.data.candidates[0].content.parts[0].text;
+// [OBSOLETO] // [OBSOLETO]       }
+// [OBSOLETO] // [OBSOLETO]     } catch(e) { console.log('Gemini no disponible para el informe, usando resumen básico'); }
+// [OBSOLETO] // [OBSOLETO] 
+// [OBSOLETO] // [OBSOLETO]     await axios.post('https://api.telegram.org/bot8671464180:AAHhu_Ct9-3Q6Arjle-7Xy4DyUGuuNvraBs/sendMessage', {
+// [OBSOLETO] // [OBSOLETO]       chat_id: '-5154764705',
+// [OBSOLETO] // [OBSOLETO]       text: '📊 <b>INFORME DE GEMINIS02</b>\n\n' + informe,
+// [OBSOLETO] // [OBSOLETO]       parse_mode: 'HTML'
+// [OBSOLETO] // [OBSOLETO]     }, { timeout: 5000 });
+// [OBSOLETO] // [OBSOLETO] 
+// [OBSOLETO] // [OBSOLETO]     res.json({ success: true, estado, informe });
+// [OBSOLETO] // [OBSOLETO]   } catch(e) { res.status(500).json({ error: e.message }); }
+// [OBSOLETO] // [OBSOLETO] });
+// [OBSOLETO] 
+// [OBSOLETO] 
+// [OBSOLETO] 
+// [OBSOLETO] // ==================== LIQUIDACIÓN DE APUESTAS (TRANSACCIONAL) ====================
+// [OBSOLETO] app.post('/api/apuestas/liquidar', async (req, res) => {
+// [OBSOLETO]   const { partidoId, resultadoGanador } = req.body;
+// [OBSOLETO]   if (!partidoId || !resultadoGanador) {
+// [OBSOLETO]     return res.status(400).json({ error: 'partidoId y resultadoGanador requeridos' });
+// [OBSOLETO]   }
 // [OBSOLETO]   try {
-// [OBSOLETO]     const estado = { proxy: 'ok', agentes: {}, eventos: 0, chatbot: false, saldo_firebase: null, saldo_endpoint: null };
-// [OBSOLETO]     
-// [OBSOLETO]     const [agentsResp, fixturesResp, chatResp, saldoFB, saldoEP] = await Promise.allSettled([
-// [OBSOLETO]       axios.get('https://betgroup-proxy-v2.onrender.com/api/agents-status', { timeout: 3000 }),
-// [OBSOLETO]       axios.get('https://betgroup-proxy-v2.onrender.com/api/fixtures', { timeout: 3000 }),
-// [OBSOLETO]       axios.post('https://betgroup-proxy-v2.onrender.com/api/chat', { mensaje: 'Test' }, { timeout: 3000 }),
-// [OBSOLETO]       db.ref('users/BG_mq7rch3t_h6sjfs1h/creditoReal').once('value'),
-// [OBSOLETO]       axios.get('https://betgroup-proxy-v2.onrender.com/api/saldo/BG_mq7rch3t_h6sjfs1h', { timeout: 3000 })
-// [OBSOLETO]     ]);
+// [OBSOLETO]     const snapshot = await db.ref('apuestas').once('value');
+// [OBSOLETO]     if (!snapshot.exists()) {
+// [OBSOLETO]       return res.status(200).json({ message: 'No hay apuestas para liquidar.' });
+// [OBSOLETO]     }
+// [OBSOLETO]     const todosUsuarios = snapshot.val();
+// [OBSOLETO]     let liquidadas = 0;
 // [OBSOLETO] 
-// [OBSOLETO]     if (agentsResp.status === 'fulfilled') estado.agentes = agentsResp.value.data?.agents || {};
-// [OBSOLETO]     if (fixturesResp.status === 'fulfilled') estado.eventos = fixturesResp.value.data?.total || 0;
-// [OBSOLETO]     if (chatResp.status === 'fulfilled') estado.chatbot = chatResp.value.data?.success || false;
-// [OBSOLETO]     if (saldoFB.status === 'fulfilled') estado.saldo_firebase = saldoFB.value.val();
-// [OBSOLETO]     if (saldoEP.status === 'fulfilled') estado.saldo_endpoint = saldoEP.value.data?.creditoReal;
+// [OBSOLETO]     for (const uid of Object.keys(todosUsuarios)) {
+// [OBSOLETO]       const apuestasUsuario = todosUsuarios[uid];
+// [OBSOLETO]       for (const betId of Object.keys(apuestasUsuario)) {
+// [OBSOLETO]         const apuesta = apuestasUsuario[betId];
+// [OBSOLETO]         if (apuesta.estado !== 'pendiente') continue;
+// [OBSOLETO]         if (apuesta.eventoNombre !== partidoId) continue;
 // [OBSOLETO] 
-// [OBSOLETO]     // Formato exacto del curl funcional
-// [OBSOLETO]     const geminiKey = 'AQ.Ab8RN6ISClY4ZsjItifSBivdyJinPc1Gh4Ic1BF3cqstAV4lkg';
-// [OBSOLETO]     let informe = 'Sistema operativo. Saldo Firebase: ' + estado.saldo_firebase + ' | Saldo endpoint: ' + estado.saldo_endpoint;
-// [OBSOLETO]     
-// [OBSOLETO]     try {
-// [OBSOLETO]       const resp = await axios.post(
-// [OBSOLETO]         'https://generativelanguage.googleapis.com/v1beta/models/gemini-flash-latest:generateContent',
-// [OBSOLETO]         { contents: [{ parts: [{ text: 'Eres el verificador de BetGroup Pro. Datos del sistema: ' + JSON.stringify(estado) + '. Genera un informe breve en 2 frases.' }] }] },
-// [OBSOLETO]         { headers: { 'X-goog-api-key': geminiKey, 'Content-Type': 'application/json' }, timeout: 8000 }
-// [OBSOLETO]       );
-// [OBSOLETO]       if (resp.data?.candidates?.[0]?.content?.parts?.[0]?.text) {
-// [OBSOLETO]         informe = resp.data.candidates[0].content.parts[0].text;
+// [OBSOLETO]         const gano = (apuesta.tipo === resultadoGanador);
+// [OBSOLETO]         const nuevoEstado = gano ? 'ganada' : 'perdida';
+// [OBSOLETO] 
+// [OBSOLETO]         await db.ref(`apuestas/${uid}/${betId}`).update({ estado: nuevoEstado });
+// [OBSOLETO] 
+// [OBSOLETO]         if (gano) {
+// [OBSOLETO]           const premio = parseFloat(apuesta.monto) * parseFloat(apuesta.cuota);
+// [OBSOLETO]           const userRef = db.ref(`users/${uid}/creditoReal`);
+// [OBSOLETO]           await userRef.transaction(current => (current || 0) + premio);
+// [OBSOLETO] 
+// [OBSOLETO]           await db.ref('auditLog').push().set({
+// [OBSOLETO]             tipo: 'pago_premio',
+// [OBSOLETO]             uid,
+// [OBSOLETO]             betId,
+// [OBSOLETO]             montoPagado: premio,
+// [OBSOLETO]             fecha: Date.now()
+// [OBSOLETO]           });
+// [OBSOLETO]         }
+// [OBSOLETO]         liquidadas++;
 // [OBSOLETO]       }
-// [OBSOLETO]     } catch(e) { console.log('Gemini no disponible para el informe, usando resumen básico'); }
-// [OBSOLETO] 
-// [OBSOLETO]     await axios.post('https://api.telegram.org/bot8671464180:AAHhu_Ct9-3Q6Arjle-7Xy4DyUGuuNvraBs/sendMessage', {
-// [OBSOLETO]       chat_id: '-5154764705',
-// [OBSOLETO]       text: '📊 <b>INFORME DE GEMINIS02</b>\n\n' + informe,
-// [OBSOLETO]       parse_mode: 'HTML'
-// [OBSOLETO]     }, { timeout: 5000 });
-// [OBSOLETO] 
-// [OBSOLETO]     res.json({ success: true, estado, informe });
-// [OBSOLETO]   } catch(e) { res.status(500).json({ error: e.message }); }
+// [OBSOLETO]     }
+// [OBSOLETO]     res.json({ success: true, liquidadas, message: `${liquidadas} apuestas liquidadas.` });
+// [OBSOLETO]   } catch (error) {
+// [OBSOLETO]     res.status(500).json({ error: error.message });
+// [OBSOLETO]   }
 // [OBSOLETO] });
-
-
-
-// ==================== LIQUIDACIÓN DE APUESTAS (TRANSACCIONAL) ====================
-app.post('/api/apuestas/liquidar', async (req, res) => {
-  const { partidoId, resultadoGanador } = req.body;
-  if (!partidoId || !resultadoGanador) {
-    return res.status(400).json({ error: 'partidoId y resultadoGanador requeridos' });
-  }
-  try {
-    const snapshot = await db.ref('apuestas').once('value');
-    if (!snapshot.exists()) {
-      return res.status(200).json({ message: 'No hay apuestas para liquidar.' });
-    }
-    const todosUsuarios = snapshot.val();
-    let liquidadas = 0;
-
-    for (const uid of Object.keys(todosUsuarios)) {
-      const apuestasUsuario = todosUsuarios[uid];
-      for (const betId of Object.keys(apuestasUsuario)) {
-        const apuesta = apuestasUsuario[betId];
-        if (apuesta.estado !== 'pendiente') continue;
-        if (apuesta.eventoNombre !== partidoId) continue;
-
-        const gano = (apuesta.tipo === resultadoGanador);
-        const nuevoEstado = gano ? 'ganada' : 'perdida';
-
-        await db.ref(`apuestas/${uid}/${betId}`).update({ estado: nuevoEstado });
-
-        if (gano) {
-          const premio = parseFloat(apuesta.monto) * parseFloat(apuesta.cuota);
-          const userRef = db.ref(`users/${uid}/creditoReal`);
-          await userRef.transaction(current => (current || 0) + premio);
-
-          await db.ref('auditLog').push().set({
-            tipo: 'pago_premio',
-            uid,
-            betId,
-            montoPagado: premio,
-            fecha: Date.now()
-          });
-        }
-        liquidadas++;
-      }
-    }
-    res.json({ success: true, liquidadas, message: `${liquidadas} apuestas liquidadas.` });
-  } catch (error) {
-    res.status(500).json({ error: error.message });
-  }
-});
 // ==================== FIN LIQUIDACIÓN ====================
 
 
@@ -975,80 +975,8 @@ app.post('/api/admin/aplicar-codigo', async (req, res) => {
 
 setCache('fixtures', null);
 console.log('Caché de fixtures limpiado al inicio.');
-
-// ════ POST /api/enriquecer — Frontend envía eventos ESPN, backend agrega cuotas ════
-app.post('/api/enriquecer', async (req, res) => {
-  try {
-    const { eventos } = req.body;
-    if (!Array.isArray(eventos) || eventos.length === 0) {
-      return res.status(400).json({ error: 'Se requiere array de eventos' });
-    }
-    const enriquecidos = await enriquecerConCuotas(eventos);
-    res.json({ status: 'success', total: enriquecidos.length, data: enriquecidos });
-  } catch(err) {
-    console.error('Error /api/enriquecer:', err.message);
-    res.status(500).json({ error: err.message });
-  }
-});
-
 app.listen(PORT, () => {
-  programarBroadcast();
   console.log(`✅ Proxy escuchando en puerto ${PORT}`);
   precalentarCache();
   setInterval(precalentarCache, 3 * 60 * 1000);
 });
-
-// BROADCAST DIARIO DE CUOTAS A TELEGRAM
-async function broadcastCuotasDiarias() {
-  try {
-    let fixtures = getCache('fixtures');
-    if (!fixtures || !fixtures.data || fixtures.data.length === 0) {
-      await new Promise(function(r){ setTimeout(r,30000); });
-      fixtures = getCache('fixtures');
-    }
-    const eventos = (fixtures && fixtures.data) ? fixtures.data : [];
-    if (eventos.length === 0) {
-      await notificarTelegram('BetGroup Pro: Sin eventos hoy.');
-      return;
-    }
-    const conCuotas = eventos.filter(function(e){ return e.cuota_local && e.cuota_local > 0; }).slice(0,5);
-    const sel = conCuotas.length > 0 ? conCuotas : eventos.slice(0,3);
-    const fecha = new Date().toLocaleDateString('es-ES',{weekday:'long',day:'numeric',month:'long'});
-    const NL = String.fromCharCode(10);
-    let msg = '*BETGROUP PRO - CUOTAS DEL DIA*' + NL;
-    msg += fecha.toUpperCase() + NL;
-    msg += '----------------------------' + NL + NL;
-    for (let i=0; i<sel.length; i++) {
-      const ev = sel[i];
-      msg += (i+1) + '. *' + ev.local + '* vs *' + ev.visitante + '*' + NL;
-      msg += (ev.sport||'').toUpperCase() + ' | ' + (ev.liga||'') + ' | ' + (ev.estado==='live' ? 'EN VIVO' : 'PROXIMO') + NL;
-      if (ev.cuota_local && ev.cuota_visitante) {
-        msg += '1:' + ev.cuota_local;
-        if (ev.cuota_empate) { msg += ' X:' + ev.cuota_empate; }
-        msg += ' 2:' + ev.cuota_visitante + NL;
-      }
-      if (ev.handicap_local) { msg += 'Handicap: ' + ev.handicap_local + NL; }
-      if (ev.total_over_point) { msg += 'Over/Under ' + ev.total_over_point + ': O:' + ev.total_over_price + ' U:' + ev.total_under_price + NL; }
-      msg += NL;
-    }
-    msg += '----------------------------' + NL;
-    msg += 'Apuesta en: https://betgroup-cuba-2024.web.app';
-    await notificarTelegram(msg);
-    console.log('Broadcast OK.');
-  } catch(err) {
-    console.error('Error broadcast:', err.message);
-  }
-}
-
-function programarBroadcast() {
-  const ahora = new Date();
-  const proxima = new Date();
-  proxima.setUTCHours(13,0,0,0);
-  if (proxima <= ahora) { proxima.setUTCDate(proxima.getUTCDate()+1); }
-  const ms = proxima - ahora;
-  console.log('Proximo broadcast en ' + Math.round(ms/60000) + ' minutos');
-  setTimeout(function(){
-    broadcastCuotasDiarias();
-    setInterval(broadcastCuotasDiarias, 86400000);
-  }, ms);
-}
