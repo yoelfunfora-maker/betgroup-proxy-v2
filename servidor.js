@@ -1021,7 +1021,7 @@ app.post('/api/huggingface', async (req, res) => {
       body: JSON.stringify({
         model: model,
         messages: [{ role: 'user', content: prompt }],
-        max_tokens: 500
+        max_tokens: 2000
       })
     });
     const data = await response.json();
