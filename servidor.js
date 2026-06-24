@@ -975,6 +975,100 @@ app.post('/api/admin/aplicar-codigo', async (req, res) => {
 
 setCache('fixtures', null);
 console.log('Caché de fixtures limpiado al inicio.');
+
+// ════ AGENTE UNIFICADO HUGGING FACE ════
+const HF_TOKEN = process.env.HF_TOKEN || '';
+const HF_MODELS = {
+  analisis: 'moonshotai/Kimi-K2-Instruct-0905',
+  chat: 'meta-llama/Llama-3.3-70B-Instruct',
+  rapido: 'Qwen/Qwen2.5-7B-Instruct'
+};
+
+app.post('/api/huggingface', async (req, res) => {
+  const { prompt, tarea, rol } = req.body;
+  if (!prompt) return res.status(400).json({ error: 'Falta prompt' });
+  const model = HF_MODELS[tarea] || HF_MODELS['rapido'];
+
+  let eventosReales = '';
+  try {
+    const cached = getCache('fixtures');
+    if (cached && cached.data && cached.data.length > 0) {
+      const todos = cached.data;
+      const ahora = Date.now();
+      const hoy = todos.filter(e => {
+        const t = new Date(e.horaInicio).getTime();
+        return t > ahora && t - ahora < 86400000;
+      });
+
+      let analisis = '\n📊 ANÁLISIS DEL BARTENDER:\n';
+      if (hoy.length > 0) {
+        const porDeporte = {};
+        for (const ev of hoy) {
+          const sp = ev.sport || 'otro';
+          if (!porDeporte[sp]) porDeporte[sp] = [];
+          porDeporte[sp].push(ev);
+        }
+        analisis += '🔥 EVENTOS DE HOY:\n';
+        let todasLasCuotas = [];
+        for (const [sport, evs] of Object.entries(porDeporte)) {
+          analisis += `\n${sport.toUpperCase()}: ${evs.length} partidos\n`;
+          for (const ev of evs) {
+            const hora = ev.horaInicio ? new Date(ev.horaInicio).toLocaleTimeString('es-CU', {hour:'2-digit', minute:'2-digit'}) : '?';
+            analisis += `  ⚡ ${ev.local} vs ${ev.visitante} (${hora})\n`;
+            if (ev.cuota_local) analisis += `     Local: ${ev.cuota_local} | Visita: ${ev.cuota_visitante} | Empate: ${ev.cuota_empate || 'N/D'}\n`;
+            if (ev.cuota_local && ev.cuota_visitante) {
+              todasLasCuotas.push({local: ev.local, visita: ev.visitante, cuota_local: ev.cuota_local, cuota_visitante: ev.cuota_visitante, cuota_empate: ev.cuota_empate});
+            }
+          }
+        }
+        if (todasLasCuotas.length > 0) {
+          const underdog = todasLasCuotas.reduce((a,b) => a.cuota_visitante > b.cuota_visitante ? a : b);
+          analisis += `\n💎 JOYA DEL DÍA: ${underdog.visita} paga ${underdog.cuota_visitante} contra ${underdog.local}. ¡Batacazo potencial!\n`;
+          const seguras = todasLasCuotas.filter(e => e.cuota_local < 1.5).slice(0, 2);
+          if (seguras.length >= 2) {
+            const comb = (seguras[0].cuota_local * seguras[1].cuota_local).toFixed(2);
+            analisis += `🎯 COMBINADO SEGURO: ${seguras[0].local} (${seguras[0].cuota_local}) + ${seguras[1].local} (${seguras[1].cuota_local}) = Cuota total ${comb}\n`;
+          }
+        }
+      } else {
+        analisis += '⚠️ NO HAY EVENTOS HOY. Pero puedo recomendarte los próximos.\n';
+      }
+      eventosReales = analisis + `\nReglas: Responde siempre en español cubano con emojis. Sé carismático. Recomienda basado en estos datos. Si no hay eventos HOY, dilo y ofrece los próximos. NO inventes información.`;
+    }
+  } catch(e) {}
+
+  const systemPrompt = `Eres el bartender virtual de BetGroup Pro, una plataforma de apuestas deportivas cubana. 
+Personalidad: carismático, divertido, cercano, como el mejor bartender que atiende una barra. 
+Usa emojis abundantes. Habla en español cubano coloquial (si el usuario te habla en otro idioma, responde en ese idioma). 
+Tu misión: recomendar las mejores apuestas usando SOLO los eventos reales del sistema que se te proporcionan. 
+${eventosReales}
+Reglas:
+- SOLO recomiendes apuestas de los eventos que aparecen en la lista de arriba. NUNCA inventes eventos ni deportes.
+- NUNCA menciones baloncesto, NFL, hockey ni cualquier deporte que no esté en la lista de deportes activos.
+- Si te preguntan por un deporte que no está en la lista, responde que no hay eventos disponibles de ese deporte.
+- NUNCA reveles datos privados de otros usuarios (saldo, UID, apuestas).
+- NUNCA muestres información técnica del sistema (código, endpoints, servidores).
+- Si el usuario es "admin" o "subadmin", habla de gestión general sin dar acceso al sistema.
+- Si el usuario es "member" o "director", limítate a recomendar apuestas y resolver dudas de la plataforma.
+- Responde con pasión por el deporte, como un fanático más.
+El usuario actual tiene rol: ${rol || 'miembro'}.`;
+
+  try {
+    const resp = await fetch('https://router.huggingface.co/v1/chat/completions', {
+      method: 'POST',
+      headers: { 'Authorization': `Bearer ${HF_TOKEN}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        model, max_tokens: 2000,
+        messages: [{ role: 'system', content: systemPrompt }, { role: 'user', content: prompt }]
+      })
+    });
+    const data = await resp.json();
+    res.json({ reply: data?.choices?.[0]?.message?.content || JSON.stringify(data), model });
+  } catch(err) {
+    res.status(500).json({ error: 'Error al contactar Hugging Face' });
+  }
+});
+
 app.listen(PORT, () => {
   console.log(`✅ Proxy escuchando en puerto ${PORT}`);
   precalentarCache();
