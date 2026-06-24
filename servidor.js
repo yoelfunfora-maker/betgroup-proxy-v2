@@ -1033,6 +1033,46 @@ app.post('/api/huggingface', async (req, res) => {
   }
 });
 
+
+// Endpoint para limpiar el caché manualmente
+app.post('/api/clear-cache', async (req, res) => {
+  setCache('fixtures', null);
+  console.log('Caché de fixtures limpiado manualmente.');
+  res.json({ status: 'ok', message: 'Caché limpiado' });
+});
+
+
+// Monitoreo diario a las 8 AM
+function programarReporteDiario() {
+  const ahora = new Date();
+  const las8 = new Date(ahora);
+  las8.setHours(8, 0, 0, 0);
+  if (ahora > las8) las8.setDate(las8.getDate() + 1);
+  const msHastaLas8 = las8 - ahora;
+  setTimeout(() => {
+    setInterval(async () => {
+      try {
+        const res = await axios.get('https://betgroup-proxy-v2-8vqj.onrender.com/api/health');
+        const msg = `BetGroup Pro – Reporte Diario\n` +
+          `Fecha: ${new Date().toLocaleDateString('es-CU')}\n` +
+          `Estado: ${res.data.status}\n` +
+          `Eventos activos: ${res.data.total || 'N/D'}\n` +
+          `Agente IA: Hugging Face operativo`;
+        await fetch(`https://api.telegram.org/bot8671464180:AAHhu_Ct9-3Q6Arjle-7Xy4DyUGuuNvraBs/sendMessage`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ chat_id: '-5154764705', text: msg })
+        });
+        console.log('Reporte diario enviado a Telegram.');
+      } catch(e) {
+        console.error('Error en reporte diario:', e.message);
+      }
+    }, 24 * 60 * 60 * 1000);
+  }, msHastaLas8);
+  console.log(`Reporte diario programado para las 8 AM (en ${Math.round(msHastaLas8 / 3600000)} horas).`);
+}
+programarReporteDiario();
+
 app.listen(PORT, () => {
   console.log(`✅ Proxy escuchando en puerto ${PORT}`);
   precalentarCache();
