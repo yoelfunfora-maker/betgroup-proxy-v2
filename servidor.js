@@ -1087,6 +1087,71 @@ function programarReporteDiario() {
 }
 programarReporteDiario();
 
+
+// ==================== REPORTES AUTOMÁTICOS A TELEGRAM ====================
+async function enviarReporteTelegram() {
+  try {
+    const deportes = ['soccer_epl', 'basketball_nba', 'baseball_mlb', 'tennis_atp_wimbledon', 'mma_mixed_martial_arts'];
+    let resumen = '';
+    for (const sport of deportes) {
+      const url = `https://api.the-odds-api.com/v4/sports/${sport}/odds?apiKey=${getApiKey()}&markets=h2h&regions=us`;
+      const resp = await axios.get(url, { timeout: 5000 });
+      const eventos = resp.data || [];
+      if (eventos.length > 0) {
+        const mejores = eventos.slice(0, 2);
+        resumen += `\n🏆 ${sport.replace(/_/g, ' ').toUpperCase()}:\n`;
+        for (const ev of mejores) {
+          const cuotas = ev.bookmakers?.[0]?.markets?.[0]?.outcomes || [];
+          resumen += `  ${ev.home_team} vs ${ev.away_team}: ${cuotas.map(o => o.name + ' @ ' + o.price).join(' | ')}\n`;
+        }
+      }
+    }
+    const prompt = `Genera un reporte de apuestas para Telegram con estos datos:\n${resumen}\nIncluye: mejores cuotas, combinación recomendada (2 o 3 partidos), curiosidad estadística del día. Usa emojis, sé carismático, en español cubano. Máximo 1000 caracteres.`;
+    const hfResp = await fetch('https://router.huggingface.co/v1/chat/completions', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${HF_TOKEN}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        model: 'moonshotai/Kimi-K2-Instruct-0905',
+        messages: [
+          { role: 'system', content: 'Eres el bartender de BetGroup Pro. Responde en español cubano con emojis.' },
+          { role: 'user', content: prompt }
+        ],
+        max_tokens: 1000
+      })
+    });
+    const hfData = await hfResp.json();
+    const mensaje = hfData?.choices?.[0]?.message?.content || 'Sin reporte disponible.';
+    await fetch(`https://api.telegram.org/bot8671464180:AAHhu_Ct9-3Q6Arjle-7Xy4DyUGuuNvraBs/sendMessage`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ chat_id: '-5154764705', text: mensaje, parse_mode: 'HTML' })
+    });
+    console.log('✅ Reporte enviado a Telegram.');
+  } catch(e) {
+    console.error('Error en reporte:', e.message);
+  }
+}
+
+function programarReportes() {
+  const ahora = new Date();
+  const hora = ahora.getHours();
+  if (hora < 8) {
+    const ms = new Date(ahora).setHours(8, 0, 0, 0) - ahora;
+    setTimeout(() => { enviarReporteTelegram(); setInterval(enviarReporteTelegram, 6 * 60 * 60 * 1000); }, ms);
+  } else if (hora < 14) {
+    const ms = new Date(ahora).setHours(14, 0, 0, 0) - ahora;
+    setTimeout(() => { enviarReporteTelegram(); setInterval(enviarReporteTelegram, 6 * 60 * 60 * 1000); }, ms);
+  } else {
+    const ms = new Date(ahora).setHours(8, 0, 0, 0) - ahora + 24 * 60 * 60 * 1000;
+    setTimeout(() => { enviarReporteTelegram(); setInterval(enviarReporteTelegram, 6 * 60 * 60 * 1000); }, ms);
+  }
+  console.log('📅 Reportes programados a las 8 AM y 2 PM.');
+}
+programarReportes();
+
 app.listen(PORT, () => {
   console.log(`✅ Proxy escuchando en puerto ${PORT}`);
   precalentarCache();
