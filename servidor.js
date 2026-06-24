@@ -993,6 +993,98 @@ app.post('/api/enriquecer', async (req, res) => {
   }
 });
 
+
+// ════ AGENTE UNIFICADO HUGGING FACE ════
+const HF_TOKEN = process.env.HF_TOKEN || '';
+const HF_MODELS = {
+  analisis: 'moonshotai/Kimi-K2-Instruct-0905',
+  chat: 'meta-llama/Llama-3.3-70B-Instruct',
+  rapido: 'Qwen/Qwen2.5-7B-Instruct'
+};
+
+app.post('/api/huggingface', async (req, res) => {
+  const { prompt, tarea, rol } = req.body;
+  if (!prompt) return res.status(400).json({ error: 'Falta prompt' });
+  const model = HF_MODELS[tarea] || HF_MODELS['rapido'];
+  
+  let eventosReales = '';
+  try {
+    const cached = getCache('fixtures');
+    if (cached && cached.data && cached.data.length > 0) {
+      const eventos = cached.data;
+      const deportes = [...new Set(eventos.map(e => e.sport))].join(', ');
+      eventosReales = '\nEVENTOS DISPONIBLES: ' + eventos.slice(0, 10).map(e => 
+        `${e.local} vs ${e.visitante} | ${e.sport} | cuota_local: ${e.cuota_local || 'N/D'}`).join('\n');
+      eventosReales += `\nDeportes activos: ${deportes}. SOLO recomendar de estos.`;
+    }
+  } catch(e) {}
+
+  const systemPrompt = `Eres el bartender de BetGroup Pro. Carismático, divertido, usa emojis. Habla español cubano.
+${eventosReales}
+Reglas:
+- SOLO recomiendes apuestas de los eventos listados arriba.
+- NUNCA menciones deportes que no estén en la lista.
+- NUNCA reveles datos privados ni información técnica del sistema.
+- Adapta tu respuesta al rol del usuario: ${rol || 'miembro'}.`;
+
+  try {
+    const resp = await fetch('https://router.huggingface.co/v1/chat/completions', {
+      method: 'POST',
+      headers: { 'Authorization': `Bearer ${HF_TOKEN}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        model, max_tokens: 2000,
+        messages: [{ role: 'system', content: systemPrompt }, { role: 'user', content: prompt }]
+      })
+    });
+    const data = await resp.json();
+    res.json({ reply: data?.choices?.[0]?.message?.content || JSON.stringify(data), model });
+  } catch(err) {
+    res.status(500).json({ error: 'Error al contactar Hugging Face' });
+  }
+});
+
+
+async function enviarReporteTelegram() {
+  try {
+    const resp = await axios.get('https://api.the-odds-api.com/v4/sports/soccer_epl/odds?apiKey=' + getApiKey() + '&markets=h2h&regions=us');
+    const eventos = resp.data || [];
+    let resumen = '';
+    for (const ev of eventos.slice(0, 5)) {
+      const cuotas = ev.bookmakers?.[0]?.markets?.[0]?.outcomes || [];
+      resumen += `${ev.home_team} vs ${ev.away_team}: ${cuotas.map(o => o.name + ' @ ' + o.price).join(' | ')}\n`;
+    }
+    const prompt = `Genera un reporte de apuestas para Telegram:\n${resumen}\nIncluye: mejores cuotas, combinación recomendada, curiosidad estadística. Usa emojis, español cubano.`;
+    const hfResp = await fetch('https://router.huggingface.co/v1/chat/completions', {
+      method: 'POST',
+      headers: { 'Authorization': `Bearer ${HF_TOKEN}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        model: 'moonshotai/Kimi-K2-Instruct-0905',
+        messages: [{ role: 'user', content: prompt }],
+        max_tokens: 1000
+      })
+    });
+    const hfData = await hfResp.json();
+    const mensaje = hfData?.choices?.[0]?.message?.content || 'Sin reporte.';
+    await fetch(`https://api.telegram.org/bot8671464180:AAHhu_Ct9-3Q6Arjle-7Xy4DyUGuuNvraBs/sendMessage`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ chat_id: '-5154764705', text: mensaje })
+    });
+    console.log('✅ Reporte enviado a Telegram.');
+  } catch(e) { console.error('Error reporte:', e.message); }
+}
+
+function programarReportes() {
+  const ahora = new Date();
+  const las8 = new Date(ahora).setHours(8, 0, 0, 0);
+  const las14 = new Date(ahora).setHours(14, 0, 0, 0);
+  const ms8 = las8 > ahora ? las8 - ahora : las8 - ahora + 86400000;
+  const ms14 = las14 > ahora ? las14 - ahora : las14 - ahora + 86400000;
+  setTimeout(() => { enviarReporteTelegram(); setInterval(enviarReporteTelegram, 6 * 3600000); }, Math.min(ms8, ms14));
+  console.log('📅 Reportes programados.');
+}
+programarReportes();
+
 app.listen(PORT, () => {
   console.log(`✅ Proxy escuchando en puerto ${PORT}`);
   precalentarCache();
