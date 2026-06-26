@@ -865,7 +865,24 @@ app.post('/api/apuestas/liquidar', async (req, res) => {
           const premio = parseFloat(apuesta.monto) * parseFloat(apuesta.cuota);
           const userRef = db.ref(`users/${uid}/creditoReal`);
           await userRef.transaction(current => (current || 0) + premio);
-          await notificarTelegram('Apuesta GANADA: usuario ' + uid + ' gano ' + premio.toFixed(2) + ' por ' + apuesta.eventoNombre);
+          const NL = String.fromCharCode(10);
+          const montoApostado = parseFloat(apuesta.monto);
+          const saldoSnap = await db.ref('users/' + uid + '/creditoReal').once('value');
+          const saldoActual = saldoSnap.val() || 0;
+          let msgGanada = '';
+          msgGanada += '🏆 APUESTA GANADA 🏆' + NL;
+          msgGanada += '━━━━━━━━━━━━━━━━━━━━━━' + NL;
+          msgGanada += '⚽ Evento: ' + apuesta.eventoNombre + NL;
+          msgGanada += '🎯 Tu seleccion: ' + apuesta.tipo + NL;
+          msgGanada += '📊 Cuota: x' + parseFloat(apuesta.cuota).toFixed(2) + NL;
+          msgGanada += '━━━━━━━━━━━━━━━━━━━━━━' + NL;
+          msgGanada += '💵 Monto apostado: $' + montoApostado.toFixed(2) + NL;
+          msgGanada += '💰 Ganancia: $' + premio.toFixed(2) + NL;
+          msgGanada += '🏦 Saldo actual: $' + saldoActual.toFixed(2) + NL;
+          msgGanada += '━━━━━━━━━━━━━━━━━━━━━━' + NL;
+          msgGanada += '🎉 Felicitaciones! La suerte estuvo de tu lado!' + NL;
+          msgGanada += '🔥 Sigue apostando en BetGroup Pro!';
+          await notificarTelegram(msgGanada);
 
           await db.ref('auditLog').push().set({
             tipo: 'pago_premio',
