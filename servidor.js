@@ -460,17 +460,71 @@ async function enriquecerConCuotas(eventos) {
       }
     }
   }
-  // FALLBACK: generar cuotas matematicas para eventos sin cuotas de Odds API
+  // FALLBACK INTELIGENTE: HF para eventos sin cuotas reales
   const MARGEN = 0.20;
-  for (const ev of eventos) {
-    if (ev.cuota_local && ev.cuota_local > 0) continue; // ya tiene cuotas reales
-    // Generar seed determinista basado en nombres de equipos
+  const HF_CUOTAS_TTL = 6 * 60 * 60 * 1000; // 6 horas
+  const sinCuotas = eventos.filter(function(ev){ return !ev.cuota_local || ev.cuota_local === 0; });
+
+  for (const ev of sinCuotas) {
+    const cacheKey = 'hf_cuota_' + ev.local + '_vs_' + ev.visitante;
+    const cached = getCache(cacheKey);
+    if (cached && (Date.now() - cached.timestamp) < HF_CUOTAS_TTL) {
+      ev.cuota_local = cached.cuota_local;
+      ev.cuota_visitante = cached.cuota_visitante;
+      if (cached.cuota_empate) ev.cuota_empate = cached.cuota_empate;
+      ev.fuenteCuotas = 'hf-cache';
+      continue;
+    }
+
+    // Obtener record ESPN si existe en el evento
+    const recordLocal = ev.recordLocal || '';
+    const recordVisitante = ev.recordVisitante || '';
+    const tieneEmpate = ev.sport === 'soccer';
+
+    const promptCuotas = 'Eres un analista deportivo experto. Genera cuotas de apuestas realistas para este partido de ' + (ev.sport || 'deporte') + ':' +
+      ' Local: ' + ev.local + (recordLocal ? ' (record: ' + recordLocal + ')' : '') +
+      ' vs Visitante: ' + ev.visitante + (recordVisitante ? ' (record: ' + recordVisitante + ')' : '') +
+      '. Liga: ' + (ev.liga || ev.sport) +
+      '. Aplica un margen de casa del 20%.' +
+      (tieneEmpate ? ' Incluye cuota de empate.' : '') +
+      ' Responde SOLO con JSON valido sin explicaciones: ' +
+      (tieneEmpate ? '{local:X.XX,visitante:X.XX,empate:X.XX}' : '{local:X.XX,visitante:X.XX}');
+
+    try {
+      const hfResp = await fetch('https://router.huggingface.co/v1/chat/completions', {
+        method: 'POST',
+        headers: { 'Authorization': 'Bearer ' + HF_TOKEN, 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          model: HF_MODELS.rapido,
+          max_tokens: 100,
+          messages: [{ role: 'user', content: promptCuotas }]
+        })
+      });
+      const hfData = await hfResp.json();
+      const reply = hfData && hfData.choices && hfData.choices[0] ? hfData.choices[0].message.content : '';
+      const match = reply.match(/\{[^}]+\}/);
+      if (match) {
+        const cuotas = JSON.parse(match[0]);
+        if (cuotas.local && cuotas.visitante) {
+          ev.cuota_local = parseFloat(cuotas.local);
+          ev.cuota_visitante = parseFloat(cuotas.visitante);
+          if (cuotas.empate) ev.cuota_empate = parseFloat(cuotas.empate);
+          ev.fuenteCuotas = 'hf-kimi';
+          setCache(cacheKey, { cuota_local: ev.cuota_local, cuota_visitante: ev.cuota_visitante, cuota_empate: ev.cuota_empate || null, timestamp: Date.now() });
+          console.log('Cuota HF generada para: ' + ev.local + ' vs ' + ev.visitante + ' -> ' + ev.cuota_local + '/' + ev.cuota_visitante);
+          continue;
+        }
+      }
+    } catch(hfErr) {
+      console.error('Error HF cuotas:', hfErr.message);
+    }
+
+    // ULTIMO RECURSO: fallback matematico determinista
     const seed = (ev.local + ev.visitante).split('').reduce(function(a,c){ return a + c.charCodeAt(0); }, 0);
     const rand = function(min, max) {
       const x = Math.sin(seed + min * 100) * 10000;
       return min + (x - Math.floor(x)) * (max - min);
     };
-    // Cuotas base por deporte
     const bases = {
       soccer:     { localMin: 1.40, localMax: 3.50, visitanteMin: 1.40, visitanteMax: 4.00, empate: true },
       baseball:   { localMin: 1.50, localMax: 2.80, visitanteMin: 1.50, visitanteMax: 2.80, empate: false },
@@ -479,15 +533,11 @@ async function enriquecerConCuotas(eventos) {
       mma:        { localMin: 1.30, localMax: 4.00, visitanteMin: 1.30, visitanteMax: 4.00, empate: false }
     };
     const cfg = bases[ev.sport] || bases.soccer;
-    const rawLocal = rand(cfg.localMin, cfg.localMax);
-    const rawVisitante = rand(cfg.visitanteMin, cfg.visitanteMax);
-    ev.cuota_local = parseFloat((rawLocal * (1 - MARGEN)).toFixed(2));
-    ev.cuota_visitante = parseFloat((rawVisitante * (1 - MARGEN)).toFixed(2));
-    if (cfg.empate) {
-      ev.cuota_empate = parseFloat((rand(2.80, 3.80) * (1 - MARGEN)).toFixed(2));
-    }
+    ev.cuota_local = parseFloat((rand(cfg.localMin, cfg.localMax) * (1 - MARGEN)).toFixed(2));
+    ev.cuota_visitante = parseFloat((rand(cfg.visitanteMin, cfg.visitanteMax) * (1 - MARGEN)).toFixed(2));
+    if (cfg.empate) ev.cuota_empate = parseFloat((rand(2.80, 3.80) * (1 - MARGEN)).toFixed(2));
     ev.fuenteCuotas = 'fallback';
-    console.log('Cuota fallback generada para: ' + ev.local + ' vs ' + ev.visitante);
+    console.log('Cuota fallback para: ' + ev.local + ' vs ' + ev.visitante);
   }
   return eventos;
 }
