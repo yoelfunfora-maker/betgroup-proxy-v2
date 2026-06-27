@@ -460,6 +460,35 @@ async function enriquecerConCuotas(eventos) {
       }
     }
   }
+  // FALLBACK: generar cuotas matematicas para eventos sin cuotas de Odds API
+  const MARGEN = 0.20;
+  for (const ev of eventos) {
+    if (ev.cuota_local && ev.cuota_local > 0) continue; // ya tiene cuotas reales
+    // Generar seed determinista basado en nombres de equipos
+    const seed = (ev.local + ev.visitante).split('').reduce(function(a,c){ return a + c.charCodeAt(0); }, 0);
+    const rand = function(min, max) {
+      const x = Math.sin(seed + min * 100) * 10000;
+      return min + (x - Math.floor(x)) * (max - min);
+    };
+    // Cuotas base por deporte
+    const bases = {
+      soccer:     { localMin: 1.40, localMax: 3.50, visitanteMin: 1.40, visitanteMax: 4.00, empate: true },
+      baseball:   { localMin: 1.50, localMax: 2.80, visitanteMin: 1.50, visitanteMax: 2.80, empate: false },
+      basketball: { localMin: 1.30, localMax: 2.50, visitanteMin: 1.50, visitanteMax: 2.80, empate: false },
+      tennis:     { localMin: 1.25, localMax: 3.50, visitanteMin: 1.25, visitanteMax: 3.50, empate: false },
+      mma:        { localMin: 1.30, localMax: 4.00, visitanteMin: 1.30, visitanteMax: 4.00, empate: false }
+    };
+    const cfg = bases[ev.sport] || bases.soccer;
+    const rawLocal = rand(cfg.localMin, cfg.localMax);
+    const rawVisitante = rand(cfg.visitanteMin, cfg.visitanteMax);
+    ev.cuota_local = parseFloat((rawLocal * (1 - MARGEN)).toFixed(2));
+    ev.cuota_visitante = parseFloat((rawVisitante * (1 - MARGEN)).toFixed(2));
+    if (cfg.empate) {
+      ev.cuota_empate = parseFloat((rand(2.80, 3.80) * (1 - MARGEN)).toFixed(2));
+    }
+    ev.fuenteCuotas = 'fallback';
+    console.log('Cuota fallback generada para: ' + ev.local + ' vs ' + ev.visitante);
+  }
   return eventos;
 }
 
