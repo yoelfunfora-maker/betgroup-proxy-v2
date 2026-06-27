@@ -348,7 +348,7 @@ async function enriquecerConCuotas(eventos) {
     'basketball': 'basketball_nba',
     'baseball': 'baseball_mlb',
     'mma': 'mma_mixed_martial_arts',
-    'tennis': 'tennis_atp_wimbledon'
+    'tennis': ['tennis_atp_wimbledon', 'tennis_wta_wimbledon']
   };
 
   // Agrupar eventos por sportKey
