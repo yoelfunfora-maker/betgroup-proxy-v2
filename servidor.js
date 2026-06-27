@@ -654,6 +654,33 @@ app.get('/api/saldo/:uid', async (req, res) => {
 
 
 
+// ==================== ENDPOINT HF CUOTAS (sin bartender) ====================
+app.post('/api/huggingface/cuotas', async (req, res) => {
+  const { prompt, modelo } = req.body;
+  if (!prompt) return res.status(400).json({ error: 'Falta prompt' });
+  const model = modelo || HF_MODELS.analisis;
+  try {
+    const resp = await fetch('https://router.huggingface.co/v1/chat/completions', {
+      method: 'POST',
+      headers: { 'Authorization': 'Bearer ' + HF_TOKEN, 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        model: model,
+        max_tokens: 2000,
+        messages: [{ role: 'user', content: prompt }]
+      })
+    });
+    const data = await resp.json();
+    const reply = data && data.choices && data.choices[0] && data.choices[0].message
+      ? data.choices[0].message.content
+      : JSON.stringify(data);
+    res.json({ reply: reply, model: model });
+  } catch(err) {
+    console.error('Error /api/huggingface/cuotas:', err.message);
+    res.status(500).json({ error: 'Error al contactar Hugging Face' });
+  }
+});
+// ==================== FIN ENDPOINT HF CUOTAS ====================
+
 // ==================== ENDPOINT DE ESTADO DE AGENTES ====================
 
 
