@@ -1218,45 +1218,138 @@ app.post('/api/enriquecer', async (req, res) => {
 });
 
 
-// ════ REPORTES AUTOMÁTICOS A TELEGRAM ════
+// REPORTES Y AUTOMATIZACION
 async function enviarReporteTelegram() {
   try {
-    const resp = await axios.get('https://api.the-odds-api.com/v4/sports/soccer_epl/odds?apiKey=' + getApiKey() + '&markets=h2h&regions=us');
-    const eventos = resp.data || [];
+    const NL = String.fromCharCode(10);
+    const fixtures = getCache('fixtures');
+    const eventos = (fixtures && fixtures.data) ? fixtures.data.filter(function(e){ return e.cuota_local && e.cuota_local > 0; }).slice(0,5) : [];
+    if (eventos.length === 0) { await notificarTelegram('BetGroup Pro: Sin eventos para el reporte.'); return; }
     let resumen = '';
-    for (const ev of eventos.slice(0, 5)) {
-      const cuotas = ev.bookmakers?.[0]?.markets?.[0]?.outcomes || [];
-      resumen += `${ev.home_team} vs ${ev.away_team}: ${cuotas.map(o => o.name + ' @ ' + o.price).join(' | ')}\n`;
+    for (const ev of eventos) {
+      resumen += ev.local + ' vs ' + ev.visitante + ': Local@' + ev.cuota_local + ' Visitante@' + ev.cuota_visitante + NL;
     }
-    const prompt = `Genera un reporte de apuestas para Telegram:\n${resumen}\nIncluye: mejores cuotas, combinación recomendada, curiosidad estadística. Usa emojis, español cubano.`;
+    const prompt = 'Analista deportivo cubano. Eventos de hoy:' + NL + resumen + NL + 'Genera mensaje Telegram: mejor cuota, combinacion recomendada, curiosidad. Emojis, cubano. Max 150 palabras.';
     const hfResp = await fetch('https://router.huggingface.co/v1/chat/completions', {
       method: 'POST',
-      headers: { 'Authorization': `Bearer ${HF_TOKEN}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        model: 'moonshotai/Kimi-K2-Instruct-0905',
-        messages: [{ role: 'user', content: prompt }],
-        max_tokens: 1000
-      })
+      headers: { 'Authorization': 'Bearer ' + HF_TOKEN, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ model: HF_MODELS.rapido, messages: [{ role: 'user', content: prompt }], max_tokens: 400 })
     });
     const hfData = await hfResp.json();
-    const mensaje = hfData?.choices?.[0]?.message?.content || 'Sin reporte.';
-    await fetch(`https://api.telegram.org/bot8671464180:AAHhu_Ct9-3Q6Arjle-7Xy4DyUGuuNvraBs/sendMessage`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ chat_id: '-5154764705', text: mensaje })
-    });
-    console.log('✅ Reporte enviado a Telegram.');
+    const mensaje = (hfData && hfData.choices && hfData.choices[0]) ? hfData.choices[0].message.content : 'Sin reporte.';
+    await notificarTelegram(mensaje);
+    console.log('Reporte Telegram OK.');
   } catch(e) { console.error('Error reporte:', e.message); }
+}
+
+async function liquidarApuestasAutomatico() {
+  try {
+    const rutas = [
+      { path: 'baseball/mlb/scoreboard', sport: 'baseball' },
+      { path: 'soccer/fifa.world_cup/scoreboard', sport: 'soccer' },
+      { path: 'basketball/nba/scoreboard', sport: 'basketball' },
+      { path: 'mma/ufc/scoreboard', sport: 'mma' },
+      { path: 'tennis/atp/scoreboard', sport: 'tennis' },
+      { path: 'tennis/wta/scoreboard', sport: 'tennis' }
+    ];
+    const apSnap = await db.ref('apuestas').once('value');
+    const todas = apSnap.val() || {};
+    let liquidadas = 0;
+    for (const dep of rutas) {
+      try {
+        const data = await fetchESPN(dep.path);
+        for (const ev of (data.events || [])) {
+          const state = ev.status && ev.status.type ? ev.status.type.state : '';
+          if (state !== 'post') continue;
+          const comp = ev.competitions && ev.competitions[0] ? ev.competitions[0] : null;
+          if (!comp) continue;
+          let home = null, away = null;
+          for (const t of (comp.competitors || [])) {
+            if (t.homeAway === 'home') home = t;
+            if (t.homeAway === 'away') away = t;
+          }
+          if (!home || !away) continue;
+          const hs = parseInt(home.score || 0);
+          const as2 = parseInt(away.score || 0);
+          const hn = home.team ? home.team.displayName : '';
+          const an = away.team ? away.team.displayName : '';
+          const nombre = hn + ' vs ' + an;
+          let resultado = null;
+          if (hs > as2) resultado = 'Local';
+          else if (hs < as2) resultado = 'Visitante';
+          else if (dep.sport === 'soccer') resultado = 'Empate';
+          if (!resultado) continue;
+          for (const uid of Object.keys(todas)) {
+            for (const bid of Object.keys(todas[uid] || {})) {
+              const ap = todas[uid][bid];
+              if (!ap || ap.estado !== 'pendiente') continue;
+              if (!ap.eventoNombre || ap.eventoNombre.toLowerCase().trim() !== nombre.toLowerCase().trim()) continue;
+              const gano = ap.tipo === resultado;
+              await db.ref('apuestas/' + uid + '/' + bid + '/estado').set(gano ? 'ganada' : 'perdida');
+              if (gano) {
+                const premio = parseFloat(ap.monto) * parseFloat(ap.cuota);
+                await db.ref('users/' + uid + '/creditoReal').transaction(function(cur){ return (cur || 0) + premio; });
+                const uSnap = await db.ref('users/' + uid).once('value');
+                const u = uSnap.val() || {};
+                const NL2 = String.fromCharCode(10);
+                const sep = '------------------------';
+                let msg = 'APUESTA GANADA' + NL2 + sep + NL2;
+                msg += 'Usuario: ' + (u.nombre || uid) + NL2;
+                msg += 'Evento: ' + ap.eventoNombre + NL2;
+                msg += 'Seleccion: ' + ap.tipo + ' | Cuota: x' + parseFloat(ap.cuota).toFixed(2) + NL2;
+                msg += 'Apostado: $' + parseFloat(ap.monto).toFixed(2) + ' | Ganancia: $' + premio.toFixed(2) + NL2;
+                msg += 'Felicitaciones ' + (u.nombre || 'campeon') + '! Sigue en BetGroup Pro!';
+                await notificarTelegram(msg);
+              }
+              liquidadas++;
+            }
+          }
+        }
+      } catch(e) { console.error('AutoLiq error:', e.message); }
+    }
+    if (liquidadas > 0) console.log('Auto-liquidadas: ' + liquidadas);
+  } catch(e) { console.error('Error auto-liq:', e.message); }
+}
+
+async function enviarMonitoreo24h() {
+  try {
+    const NL = String.fromCharCode(10);
+    const fix = getCache('fixtures');
+    const totalEv = fix && fix.data ? fix.data.length : 0;
+    const conQ = fix && fix.data ? fix.data.filter(function(e){ return e.cuota_local; }).length : 0;
+    const apSnap = await db.ref('apuestas').once('value');
+    const aps = apSnap.val() || {};
+    let pend = 0, gan = 0, perd = 0;
+    for (const uid of Object.keys(aps)) {
+      for (const bid of Object.keys(aps[uid] || {})) {
+        const ap = aps[uid][bid];
+        if (!ap) continue;
+        if (ap.estado === 'pendiente') pend++;
+        else if (ap.estado === 'ganada') gan++;
+        else if (ap.estado === 'perdida') perd++;
+      }
+    }
+    const sep = '----------------------------';
+    let msg = 'MONITOREO BETGROUP PRO 24H' + NL + sep + NL;
+    msg += 'Servidor: ONLINE' + NL;
+    msg += 'Eventos: ' + totalEv + ' (' + conQ + ' con cuotas)' + NL;
+    msg += 'Pendientes: ' + pend + ' | Ganadas: ' + gan + ' | Perdidas: ' + perd + NL;
+    msg += sep + NL + 'Sistema OK.';
+    await notificarTelegram(msg);
+    console.log('Monitoreo 24h enviado.');
+  } catch(e) { console.error('Error monitoreo:', e.message); }
 }
 
 function programarReportes() {
   const ahora = new Date();
-  const las8 = new Date(ahora).setHours(8, 0, 0, 0);
-  const las14 = new Date(ahora).setHours(14, 0, 0, 0);
-  const ms8 = las8 > ahora ? las8 - ahora : las8 - ahora + 86400000;
-  const ms14 = las14 > ahora ? las14 - ahora : las14 - ahora + 86400000;
-  setTimeout(() => { enviarReporteTelegram(); setInterval(enviarReporteTelegram, 6 * 3600000); }, Math.min(ms8, ms14));
-  console.log('📅 Reportes programados a las 8 AM y 2 PM.');
+  const p8 = new Date(); p8.setUTCHours(13,0,0,0); if (p8 <= ahora) p8.setUTCDate(p8.getUTCDate()+1);
+  const p14 = new Date(); p14.setUTCHours(19,0,0,0); if (p14 <= ahora) p14.setUTCDate(p14.getUTCDate()+1);
+  setTimeout(function(){ enviarReporteTelegram(); setInterval(enviarReporteTelegram, 24*3600000); }, p8-ahora);
+  setTimeout(function(){ enviarReporteTelegram(); setInterval(enviarReporteTelegram, 24*3600000); }, p14-ahora);
+  setTimeout(function(){ enviarMonitoreo24h(); setInterval(enviarMonitoreo24h, 24*3600000); }, 24*3600000);
+  setInterval(liquidarApuestasAutomatico, 30*60*1000);
+  setTimeout(liquidarApuestasAutomatico, 5*60*1000);
+  console.log('Sistema automatizado: reportes 8am/2pm Cuba, liquidacion 30min, monitoreo 24h.');
 }
 programarReportes();
 
