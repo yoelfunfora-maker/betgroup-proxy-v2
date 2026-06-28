@@ -1342,8 +1342,8 @@ async function enviarMonitoreo24h() {
 
 function programarReportes() {
   const ahora = new Date();
-  const p8 = new Date(); p8.setUTCHours(13,0,0,0); if (p8 <= ahora) p8.setUTCDate(p8.getUTCDate()+1);
-  const p14 = new Date(); p14.setUTCHours(19,0,0,0); if (p14 <= ahora) p14.setUTCDate(p14.getUTCDate()+1);
+  const p8 = new Date(); p8.setUTCHours(12,0,0,0); if (p8 <= ahora) p8.setUTCDate(p8.getUTCDate()+1);
+  const p14 = new Date(); p14.setUTCHours(18,0,0,0); if (p14 <= ahora) p14.setUTCDate(p14.getUTCDate()+1);
   setTimeout(function(){ enviarReporteTelegram(); setInterval(enviarReporteTelegram, 24*3600000); }, p8-ahora);
   setTimeout(function(){ enviarReporteTelegram(); setInterval(enviarReporteTelegram, 24*3600000); }, p14-ahora);
   setTimeout(function(){ enviarMonitoreo24h(); setInterval(enviarMonitoreo24h, 24*3600000); }, 24*3600000);
