@@ -1351,9 +1351,6 @@ function programarReportes() {
   setTimeout(liquidarApuestasAutomatico, 5*60*1000);
   console.log('Sistema automatizado: reportes 8am/2pm Cuba, liquidacion 30min, monitoreo 24h.');
 }
-programarReportes();
-
-
 // ════ MONITOREO DEL SISTEMA ════
 app.get('/api/estado-sistema', async (req, res) => {
   const estado = {
@@ -1391,4 +1388,5 @@ app.listen(PORT, () => {
   console.log(`✅ Proxy escuchando en puerto ${PORT}`);
   precalentarCache();
   setInterval(precalentarCache, 3 * 60 * 1000);
+  programarReportes();
 });
