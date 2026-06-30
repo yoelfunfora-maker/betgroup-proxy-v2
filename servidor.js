@@ -1246,7 +1246,7 @@ async function liquidarApuestasAutomatico() {
   try {
     const rutas = [
       { path: 'baseball/mlb/scoreboard', sport: 'baseball' },
-      { path: 'soccer/fifa.world_cup/scoreboard', sport: 'soccer' },
+      { path: 'soccer/fifa.world/scoreboard', sport: 'soccer' },
       { path: 'basketball/nba/scoreboard', sport: 'basketball' },
       { path: 'mma/ufc/scoreboard', sport: 'mma' },
       { path: 'tennis/atp/scoreboard', sport: 'tennis' },
