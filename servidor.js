@@ -82,10 +82,11 @@ const ODDS_API_KEY_2 = process.env.ODDS_API_KEY_2 || '';
 
 function getApiKey() {
   const hour = new Date().getHours();
-  // Claves por defecto siempre disponibles
-  if (hour === 0 || hour === 8)  return 'e18abd8956512f34027f0ac3f87fbe52';
-  if (hour === 14 || hour === 18) return '0e31c3149f0afbb009491a0cd80169f4';
-  // Fuera de horario: devolver la clave más reciente para no parar el sistema
+  // KEY1: horas 0-7 (medianoche a 8am)
+  if (hour < 8)  return 'c56f6c464ebd4fb634c495a2c2488610';
+  // KEY2: horas 8-15 (8am a 4pm)
+  if (hour < 16) return 'e18abd8956512f34027f0ac3f87fbe52';
+  // KEY3: horas 16-23 (4pm a medianoche)
   return '0e31c3149f0afbb009491a0cd80169f4';
 }
 
