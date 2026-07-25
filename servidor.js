@@ -1223,8 +1223,21 @@ app.post('/api/enriquecer', async (req, res) => {
 async function enviarReporteTelegram() {
   try {
     const NL = String.fromCharCode(10);
-    const fixtures = getCache('fixtures');
-    const eventos = (fixtures && fixtures.data) ? fixtures.data.filter(function(e){ return e.cuota_local && e.cuota_local > 0; }).slice(0,5) : [];
+    // Intentar obtener eventos frescos directamente de ESPN + enriquecer con cuotas
+    let eventos = [];
+    try {
+      const espnData = await fetchESPN('baseball/mlb/scoreboard');
+      const espnRaw = parseEvents(espnData.events || [], 'baseball');
+      if (espnRaw.length > 0) {
+        const enriquecidos = await enriquecerConCuotas(espnRaw);
+        eventos = enriquecidos.filter(function(e){ return e.cuota_local && e.cuota_local > 0; }).slice(0,5);
+      }
+    } catch(espnErr) { console.warn('ESPN error en reporte:', espnErr.message); }
+    // Fallback: usar cache si ESPN falla
+    if (eventos.length === 0) {
+      const fixtures = getCache('fixtures');
+      eventos = (fixtures && fixtures.data) ? fixtures.data.filter(function(e){ return e.cuota_local && e.cuota_local > 0; }).slice(0,5) : [];
+    }
     if (eventos.length === 0) { await notificarTelegram('BetGroup Pro: Sin eventos para el reporte.'); return; }
     let resumen = '';
     for (const ev of eventos) {
