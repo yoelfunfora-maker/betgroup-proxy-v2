@@ -340,12 +340,40 @@ async function enriquecerConCuotas(eventos) {
   }
 
   const sportKeyMap = {
-    'soccer': (liga) => {
-    const l = (liga || '').toLowerCase();
-    if (l.includes('world') || l.includes('copa') || l.includes('fifa')) return 'soccer_fifa_world_cup';
-    if (l.includes('friendly') || l.includes('amistoso')) return 'soccer_international_friendly';
-    return 'soccer_epl';
-  },
+    'soccer': function(liga) {
+      const l = (liga || '').toLowerCase();
+      if (l.includes('world') || l.includes('fifa')) return 'soccer_fifa_world_cup';
+      if (l.includes('mls')) return 'soccer_usa_mls';
+      if (l.includes('bundesliga') && l.includes('2')) return 'soccer_germany_bundesliga2';
+      if (l.includes('bundesliga')) return 'soccer_germany_bundesliga';
+      if (l.includes('premier') || l.includes('epl')) return 'soccer_epl';
+      if (l.includes('la liga') || l.includes('spain')) return 'soccer_spain_la_liga';
+      if (l.includes('serie a') || l.includes('italy')) return 'soccer_italy_serie_a';
+      if (l.includes('ligue 1') || l.includes('france')) return 'soccer_france_ligue_one';
+      if (l.includes('libertadores')) return 'soccer_conmebol_copa_libertadores';
+      if (l.includes('sudamericana')) return 'soccer_conmebol_copa_sudamericana';
+      if (l.includes('brazil') || l.includes('brasil')) return 'soccer_brazil_campeonato';
+      if (l.includes('liga mx') || l.includes('mexico')) return 'soccer_mexico_ligamx';
+      if (l.includes('eredivisie') || l.includes('netherlands')) return 'soccer_netherlands_eredivisie';
+      if (l.includes('argentina')) return 'soccer_argentina_primera_division';
+      if (l.includes('portugal')) return 'soccer_portugal_primeira_liga';
+      if (l.includes('chile')) return 'soccer_chile_campeonato';
+      if (l.includes('norway') || l.includes('eliteserien')) return 'soccer_norway_eliteserien';
+      if (l.includes('sweden') || l.includes('allsvenskan')) return 'soccer_sweden_allsvenskan';
+      if (l.includes('superettan')) return 'soccer_sweden_superettan';
+      if (l.includes('denmark') || l.includes('superliga')) return 'soccer_denmark_superliga';
+      if (l.includes('poland') || l.includes('ekstraklasa')) return 'soccer_poland_ekstraklasa';
+      if (l.includes('russia')) return 'soccer_russia_premier_league';
+      if (l.includes('switzerland') || l.includes('swiss')) return 'soccer_switzerland_superleague';
+      if (l.includes('china')) return 'soccer_china_superleague';
+      if (l.includes('korea') || l.includes('k league')) return 'soccer_korea_kleague1';
+      if (l.includes('finland') || l.includes('veikkausliiga')) return 'soccer_finland_veikkausliiga';
+      if (l.includes('scotland')) return 'soccer_spl';
+      if (l.includes('belgium')) return 'soccer_belgium_first_div';
+      if (l.includes('austria')) return 'soccer_austria_bundesliga';
+      if (l.includes('greece')) return 'soccer_greece_super_league';
+      return 'soccer_epl';
+    },
     'basketball': 'basketball_nba',
     'baseball': 'baseball_mlb',
     'mma': 'mma_mixed_martial_arts',
