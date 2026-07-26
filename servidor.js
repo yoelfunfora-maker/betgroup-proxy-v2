@@ -1270,18 +1270,36 @@ async function enviarReporteTelegram() {
     const NL = String.fromCharCode(10);
     // Intentar obtener eventos frescos directamente de ESPN + enriquecer con cuotas
     let eventos = [];
-    try {
-      const espnData = await fetchESPN('baseball/mlb/scoreboard');
-      const espnRaw = parseEvents(espnData, 'baseball');
-      if (espnRaw.length > 0) {
-        const enriquecidos = await enriquecerConCuotas(espnRaw);
+    // Usar cache de fixtures si tiene datos
+    const fixtures = getCache('fixtures');
+    if (fixtures && fixtures.data && fixtures.data.length > 0) {
+      eventos = fixtures.data.filter(function(e){ return e.cuota_local && e.cuota_local > 0; }).slice(0,5);
+    }
+    // Si cache vacio, consultar ESPN todos los deportes
+    if (eventos.length === 0) {
+      const rutasReporte = [
+        { path: 'baseball/mlb/scoreboard', sport: 'baseball' },
+        { path: 'soccer/fifa.world/scoreboard', sport: 'soccer' },
+        { path: 'soccer/eng.1/scoreboard', sport: 'soccer' },
+        { path: 'soccer/bra.1/scoreboard', sport: 'soccer' },
+        { path: 'soccer/arg.1/scoreboard', sport: 'soccer' },
+        { path: 'soccer/mex.1/scoreboard', sport: 'soccer' },
+        { path: 'soccer/usa.1/scoreboard', sport: 'soccer' },
+        { path: 'mma/ufc/scoreboard', sport: 'mma' },
+        { path: 'basketball/nba/scoreboard', sport: 'basketball' }
+      ];
+      let allRaw = [];
+      for (const ruta of rutasReporte) {
+        try {
+          const espnData = await fetchESPN(ruta.path);
+          const parsed = parseEvents(espnData, ruta.sport);
+          allRaw = allRaw.concat(parsed);
+        } catch(e) {}
+      }
+      if (allRaw.length > 0) {
+        const enriquecidos = await enriquecerConCuotas(allRaw);
         eventos = enriquecidos.filter(function(e){ return e.cuota_local && e.cuota_local > 0; }).slice(0,5);
       }
-    } catch(espnErr) { console.warn('ESPN error en reporte:', espnErr.message); }
-    // Fallback: usar cache si ESPN falla
-    if (eventos.length === 0) {
-      const fixtures = getCache('fixtures');
-      eventos = (fixtures && fixtures.data) ? fixtures.data.filter(function(e){ return e.cuota_local && e.cuota_local > 0; }).slice(0,5) : [];
     }
     if (eventos.length === 0) { await notificarTelegram('BetGroup Pro: Sin eventos para el reporte.'); return; }
     let resumen = '';
