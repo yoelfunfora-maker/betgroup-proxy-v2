@@ -1272,7 +1272,7 @@ async function enviarReporteTelegram() {
     let eventos = [];
     try {
       const espnData = await fetchESPN('baseball/mlb/scoreboard');
-      const espnRaw = parseEvents(espnData.events || [], 'baseball');
+      const espnRaw = parseEvents(espnData, 'baseball');
       if (espnRaw.length > 0) {
         const enriquecidos = await enriquecerConCuotas(espnRaw);
         eventos = enriquecidos.filter(function(e){ return e.cuota_local && e.cuota_local > 0; }).slice(0,5);
