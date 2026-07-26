@@ -1443,6 +1443,16 @@ app.get('/api/estado-sistema', async (req, res) => {
   res.json({ success: true, estado });
 });
 
+// ENDPOINT DE PRUEBA - disparar reporte manualmente
+app.post('/api/test-reporte', async (req, res) => {
+  try {
+    await enviarReporteTelegram();
+    res.json({ success: true, message: 'Reporte enviado a Telegram.' });
+  } catch(e) {
+    res.json({ success: false, error: e.message });
+  }
+});
+
 app.listen(PORT, () => {
   console.log(`✅ Proxy escuchando en puerto ${PORT}`);
   precalentarCache();
