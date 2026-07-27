@@ -1307,13 +1307,15 @@ async function enviarReporteTelegram() {
       resumen += ev.local + ' vs ' + ev.visitante + ': Local@' + ev.cuota_local + ' Visitante@' + ev.cuota_visitante + NL;
     }
     const prompt = 'Analista deportivo cubano. Eventos de hoy:' + NL + resumen + NL + 'Genera mensaje Telegram: mejor cuota, combinacion recomendada, curiosidad. Emojis, cubano. Max 150 palabras.';
-    const hfResp = await fetch('https://router.huggingface.co/v1/chat/completions', {
+    const CF_ACCOUNT_ID2 = process.env.CF_ACCOUNT_ID || '';
+    const CF_TOKEN2 = process.env.CF_TOKEN || '';
+    const hfResp = await fetch('https://api.cloudflare.com/client/v4/accounts/' + CF_ACCOUNT_ID2 + '/ai/run/@cf/meta/llama-3.3-70b-instruct-fp8-fast', {
       method: 'POST',
-      headers: { 'Authorization': 'Bearer ' + HF_TOKEN, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ model: HF_MODELS.rapido, messages: [{ role: 'user', content: prompt }], max_tokens: 400 })
+      headers: { 'Authorization': 'Bearer ' + CF_TOKEN2, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ messages: [{ role: 'user', content: prompt }], max_tokens: 400 })
     });
     const hfData = await hfResp.json();
-    const mensaje = (hfData && hfData.choices && hfData.choices[0]) ? hfData.choices[0].message.content : 'Sin reporte.';
+    const mensaje = (hfData && hfData.result && hfData.result.response) ? hfData.result.response : 'Sin reporte.';
     await notificarTelegram(mensaje);
     console.log('Reporte Telegram OK.');
   } catch(e) { console.error('Error reporte:', e.message); }
