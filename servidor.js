@@ -520,17 +520,7 @@ async function enriquecerConCuotas(eventos) {
       (tieneEmpate ? '{local:X.XX,visitante:X.XX,empate:X.XX}' : '{local:X.XX,visitante:X.XX}');
 
     try {
-      const hfResp = await fetch('https://router.huggingface.co/v1/chat/completions', {
-        method: 'POST',
-        headers: { 'Authorization': 'Bearer ' + HF_TOKEN, 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          model: HF_MODELS.rapido,
-          max_tokens: 100,
-          messages: [{ role: 'user', content: promptCuotas }]
-        })
-      });
-      const hfData = await hfResp.json();
-      const reply = hfData && hfData.choices && hfData.choices[0] ? hfData.choices[0].message.content : '';
+      const reply = await callCF([{ role: 'user', content: promptCuotas }], 'rapido').catch(function(){ return ''; });
       const match = reply.match(/\{[^}]+\}/);
       if (match) {
         const cuotas = JSON.parse(match[0]);
@@ -756,15 +746,9 @@ app.post('/api/huggingface/cuotas', async (req, res) => {
   if (!prompt) return res.status(400).json({ error: 'Falta prompt' });
   const model = modelo || HF_MODELS.analisis;
   try {
-    const resp = await fetch('https://router.huggingface.co/v1/chat/completions', {
-      method: 'POST',
-      headers: { 'Authorization': 'Bearer ' + HF_TOKEN, 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        model: model,
-        max_tokens: 2000,
-        messages: [{ role: 'user', content: prompt }]
-      })
-    });
+    const resp = { ok: true };
+    const _cfReply1 = await callCF([{ role: 'user', content: prompt }], 'analisis');
+    const resp1_data = { choices: [{ message: { content: _cfReply1 } }] };
     const data = await resp.json();
     const reply = data && data.choices && data.choices[0] && data.choices[0].message
       ? data.choices[0].message.content
@@ -1156,6 +1140,27 @@ console.log('Caché de fixtures limpiado al inicio.');
 
 // ════ AGENTE UNIFICADO HUGGING FACE ════
 const HF_TOKEN = process.env.HF_TOKEN || '';
+
+// Helper Cloudflare AI
+async function callCF(messages, modelo) {
+  const acc = process.env.CF_ACCOUNT_ID || '';
+  const tok = process.env.CF_TOKEN || '';
+  const modelos = {
+    rapido: '@cf/qwen/qwen2.5-7b-instruct',
+    potente: '@cf/meta/llama-3.3-70b-instruct-fp8-fast',
+    analisis: '@cf/meta/llama-3.3-70b-instruct-fp8-fast'
+  };
+  const url = 'https://api.cloudflare.com/client/v4/accounts/' + acc + '/ai/run/' + (modelos[modelo] || modelos.rapido);
+  const r = await fetch(url, {
+    method: 'POST',
+    headers: { 'Authorization': 'Bearer ' + tok, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ messages: messages, max_tokens: 2000 })
+  });
+  const d = await r.json();
+  if (d.result && d.result.response) return d.result.response;
+  throw new Error(JSON.stringify(d));
+}
+
 const HF_MODELS = {
   analisis: 'moonshotai/Kimi-K2-Instruct-0905',
   chat: 'meta-llama/Llama-3.3-70B-Instruct',
@@ -1232,15 +1237,8 @@ Reglas:
 El usuario actual tiene rol: ${rol || 'miembro'}.`;
 
   try {
-    const resp = await fetch('https://router.huggingface.co/v1/chat/completions', {
-      method: 'POST',
-      headers: { 'Authorization': `Bearer ${HF_TOKEN}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        model, max_tokens: 2000,
-        messages: [{ role: 'system', content: systemPrompt }, { role: 'user', content: prompt }]
-      })
-    });
-    const data = await resp.json();
+    const _cfReply2 = await callCF([{ role: 'system', content: systemPrompt }, { role: 'user', content: prompt }], 'potente');
+    const data = { choices: [{ message: { content: _cfReply2 } }] };
     res.json({ reply: data?.choices?.[0]?.message?.content || JSON.stringify(data), model });
   } catch(err) {
     res.status(500).json({ error: 'Error al contactar Hugging Face' });
@@ -1453,12 +1451,8 @@ app.get('/api/estado-sistema', async (req, res) => {
     estado.espn = espnRes.data && espnRes.data.events ? 'online' : 'sin_datos';
   } catch(e) { estado.espn = 'error: ' + e.message; }
   try {
-    const hfRes = await fetch('https://router.huggingface.co/v1/chat/completions', {
-      method: 'POST',
-      headers: {'Authorization': 'Bearer ' + (process.env.HF_TOKEN || ''), 'Content-Type': 'application/json'},
-      body: JSON.stringify({model: 'Qwen/Qwen2.5-7B-Instruct', messages: [{role: 'user', content: 'OK'}], max_tokens: 5})
-    });
-    estado.huggingface = hfRes.ok ? 'online' : 'error_' + hfRes.status;
+    await callCF([{role: 'user', content: 'OK'}], 'rapido');
+    estado.huggingface = 'online (cloudflare)';
   } catch(e) { estado.huggingface = 'error: ' + e.message; }
   res.json({ success: true, estado });
 });
