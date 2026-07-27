@@ -1273,6 +1273,16 @@ async function enviarReporteTelegram() {
     if (fixtures && fixtures.data && fixtures.data.length > 0) {
       eventos = fixtures.data.filter(function(e){ return e.cuota_local && e.cuota_local > 0; }).slice(0,5);
     }
+    // Si cache vacio, usar precalentarCache para llenar y luego tomar datos
+    if (eventos.length === 0) {
+      try {
+        await precalentarCache();
+        const fixtures2 = getCache('fixtures');
+        if (fixtures2 && fixtures2.data && fixtures2.data.length > 0) {
+          eventos = fixtures2.data.filter(function(e){ return e.cuota_local && e.cuota_local > 0; }).slice(0,5);
+        }
+      } catch(e) { console.error('Error precalentar en reporte:', e.message); }
+    }
     // Si cache vacio, consultar ESPN todos los deportes
     if (eventos.length === 0) {
       const rutasReporte = [
