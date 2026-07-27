@@ -1268,22 +1268,23 @@ async function enviarReporteTelegram() {
     const NL = String.fromCharCode(10);
     // Intentar obtener eventos frescos directamente de ESPN + enriquecer con cuotas
     let eventos = [];
-    // Usar cache de fixtures si tiene datos
+    // Intentar primero con el cache
     const fixtures = getCache('fixtures');
     if (fixtures && fixtures.data && fixtures.data.length > 0) {
       eventos = fixtures.data.filter(function(e){ return e.cuota_local && e.cuota_local > 0; }).slice(0,5);
     }
-    // Si cache vacio, usar precalentarCache para llenar y luego tomar datos
+    // Si cache vacio, obtener directamente de ESPN + Odds API
     if (eventos.length === 0) {
       try {
-        await precalentarCache();
-        const fixtures2 = getCache('fixtures');
-        if (fixtures2 && fixtures2.data && fixtures2.data.length > 0) {
-          eventos = fixtures2.data.filter(function(e){ return e.cuota_local && e.cuota_local > 0; }).slice(0,5);
+        const espnMlb = await fetchESPN('baseball/mlb/scoreboard');
+        const rawMlb = parseEvents(espnMlb, 'baseball');
+        if (rawMlb.length > 0) {
+          const enriq = await enriquecerConCuotas(rawMlb);
+          eventos = enriq.filter(function(e){ return e.cuota_local && e.cuota_local > 0; }).slice(0,5);
         }
-      } catch(e) { console.error('Error precalentar en reporte:', e.message); }
+      } catch(e) { console.error('Error ESPN directo reporte:', e.message); }
     }
-    // Si cache vacio, consultar ESPN todos los deportes
+    // Ultimo recurso: ESPN todos los deportes
     if (eventos.length === 0) {
       const rutasReporte = [
         { path: 'baseball/mlb/scoreboard', sport: 'baseball' },
