@@ -1478,6 +1478,30 @@ app.post('/api/test-reporte', async (req, res) => {
   }
 });
 
+// ENDPOINT DEBUG - ver que eventos tiene el reporte
+app.get('/api/debug-reporte', async (req, res) => {
+  try {
+    const fixtures = getCache('fixtures');
+    const cacheEvs = fixtures && fixtures.data ? fixtures.data.length : 0;
+    const cacheConCuotas = fixtures && fixtures.data ? fixtures.data.filter(function(e){ return e.cuota_local && e.cuota_local > 0; }).length : 0;
+    let espnEvs = 0;
+    try {
+      const espnData = await fetchESPN('baseball/mlb/scoreboard');
+      const parsed = parseEvents(espnData, 'baseball');
+      espnEvs = parsed.length;
+    } catch(e) {}
+    res.json({
+      cache_total: cacheEvs,
+      cache_con_cuotas: cacheConCuotas,
+      espn_mlb_directo: espnEvs,
+      cf_account: process.env.CF_ACCOUNT_ID ? 'OK' : 'FALTA',
+      cf_token: process.env.CF_TOKEN ? 'OK' : 'FALTA'
+    });
+  } catch(e) {
+    res.json({ error: e.message });
+  }
+});
+
 app.listen(PORT, () => {
   console.log(`✅ Proxy escuchando en puerto ${PORT}`);
   precalentarCache();
