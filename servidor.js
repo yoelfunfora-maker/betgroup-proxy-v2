@@ -1430,11 +1430,37 @@ async function enviarMonitoreo24h() {
 
 function programarReportes() {
   const ahora = new Date();
-  const p8 = new Date(); p8.setUTCHours(12,0,0,0); if (p8 <= ahora) p8.setUTCDate(p8.getUTCDate()+1);
-  const p14 = new Date(); p14.setUTCHours(18,0,0,0); if (p14 <= ahora) p14.setUTCDate(p14.getUTCDate()+1);
-  setTimeout(function(){ enviarReporteTelegram(); setInterval(enviarReporteTelegram, 24*3600000); }, p8-ahora);
-  setTimeout(function(){ enviarReporteTelegram(); setInterval(enviarReporteTelegram, 24*3600000); }, p14-ahora);
-  setTimeout(function(){ enviarMonitoreo24h(); setInterval(enviarMonitoreo24h, 24*3600000); }, 24*3600000);
+  // Calcula milisegundos hasta la proxima hora UTC exacta - sin drift
+  function proximaHoraUTC(hUTC, mUTC) {
+    var t = new Date();
+    t.setUTCHours(hUTC, mUTC, 0, 0);
+    if (t <= new Date()) { t.setUTCDate(t.getUTCDate() + 1); }
+    return t - new Date();
+  }
+  // Reporte 8am Cuba = 12:00 UTC — se reprograma exacto cada dia
+  function programar8am() {
+    setTimeout(function() {
+      enviarReporteTelegram();
+      programar8am();
+    }, proximaHoraUTC(12, 0));
+  }
+  // Reporte 2pm Cuba = 18:00 UTC — se reprograma exacto cada dia
+  function programar2pm() {
+    setTimeout(function() {
+      enviarReporteTelegram();
+      programar2pm();
+    }, proximaHoraUTC(18, 0));
+  }
+  // Monitoreo 24h — se reprograma cada 24h exactas
+  function programarMonitoreo() {
+    setTimeout(function() {
+      enviarMonitoreo24h();
+      programarMonitoreo();
+    }, 24 * 3600000);
+  }
+  programar8am();
+  programar2pm();
+  programarMonitoreo();
   setInterval(liquidarApuestasAutomatico, 30*60*1000);
   setTimeout(liquidarApuestasAutomatico, 5*60*1000);
   console.log('Sistema automatizado: reportes 8am/2pm Cuba, liquidacion 30min, monitoreo 24h.');
