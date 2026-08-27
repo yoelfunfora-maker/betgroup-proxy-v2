@@ -15,11 +15,13 @@
 
 ## Stack real
 
-Firebase (frontend) + Node.js/Express en Render + Firebase Realtime Database.
+**Este único servicio de Render sirve el backend Y el frontend juntos** (confirmado por Yoel, 24 ago) — `betgroup-cuba-2024.web.app` NO se despliega vía Firebase Hosting como se creía antes, se sirve desde aquí mismo. El repo `betgroup-pro` está casi vacío y no participa del despliegue real — ver su propio ESTADO_PROYECTO.md.
+
+Node.js/Express en Render + Firebase Realtime Database (la base de datos sí es real de Firebase, solo el hosting del sitio no).
 
 - Servicio real de Render: `srv-d8li6lurnols73evdavg`
-- Backend real: `betgroup-proxy-v2-8vqj.onrender.com`
-- Frontend real: `betgroup-cuba-2024.web.app` (repo `betgroup-pro`, casi vacío — ver su propio ESTADO_PROYECTO.md)
+- URL real (backend + frontend): `betgroup-proxy-v2-8vqj.onrender.com`
+- Dominio público real: `betgroup-cuba-2024.web.app` (apunta a este mismo servicio de Render)
 - Archivo real del servidor: `servidor.js` (también existe `server.js`, verificar cuál está activo antes de editar)
 
 ## Qué se sabe del trabajo reciente (por confirmar con Yoel, info de memoria previa)
