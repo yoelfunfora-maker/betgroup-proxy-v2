@@ -9,6 +9,8 @@ const {
 } = require('./lib/seguridad');
 const { crearAuditoria } = require('./lib/auditoria');
 const { crearAutenticacion, NIVEL } = require('./lib/autenticacion');
+const validar = require('./lib/validacion');
+const crypto = require('crypto');
 
 const app = express();
 const PORT = config.puerto;
@@ -651,6 +653,12 @@ const limiteLogin = limitador({
   mensaje: 'Demasiados intentos de acceso. Prueba en 15 minutos.'
 });
 app.post('/api/auth/login', limiteLogin, auth.login);
+
+// Límites por usuario para lo que gasta cuotas de APIs de pago.
+const porUsuario = (req) => (req.usuario ? `u:${req.usuario.uid}` : `ip:${req.ip}`);
+const limiteIA = limitador({ ventanaMs: 60 * 1000, maximo: 10, clave: porUsuario });
+const limiteApuestas = limitador({ ventanaMs: 60 * 1000, maximo: 20, clave: porUsuario });
+const soloCEO = [requerirSesion, requerirNivel(NIVEL.CEO)];
 app.post('/api/auth/logout', requerirSesion, auth.logout);
 app.get('/api/auth/yo', requerirSesion, auth.yo);
 
@@ -678,10 +686,16 @@ app.get('/api/fixtures', async (req, res) => {
   }
 });
 
-app.post('/api/apostar', async (req, res) => {
-  const { uid, amount, evento, tipo, cuota, tipoSaldo } = req.body;
-  if (!uid || !amount || !evento || !tipo || !cuota) {
-    return res.status(400).json({ error: 'Parámetros faltantes' });
+app.post('/api/apostar', requerirSesion, limiteApuestas, async (req, res) => {
+  // El usuario sale de la sesión, nunca del cuerpo de la petición.
+  const uid = req.usuario.uid;
+  const { tipoSaldo } = req.body || {};
+  const amount = validar.monto(req.body?.amount);
+  const evento = validar.texto(req.body?.evento, 200);
+  const tipo = validar.tipoApuesta(req.body?.tipo);
+  const cuota = Number(req.body?.cuota);
+  if (amount === null || !evento || !tipo || !Number.isFinite(cuota) || cuota <= 1 || cuota > 1000) {
+    return res.status(400).json({ error: 'Parámetros inválidos' });
   }
   const saldoCampo = (tipoSaldo === 'promo') ? 'creditoPromo' : 'creditoReal';
   try {
@@ -717,11 +731,15 @@ app.post('/api/apostar', async (req, res) => {
 
 // ==================== ENDPOINT SALDO REAL ====================
 
-app.get('/api/saldo/:uid', async (req, res) => {
+app.get('/api/saldo/:uid', requerirSesion, async (req, res) => {
   const { uid } = req.params;
 
-  if (!uid || uid.length < 10) {
+  if (!validar.esUid(uid)) {
     return res.status(400).json({ error: 'UID inválido' });
+  }
+  // Cada uno ve su propio saldo; solo administración puede ver el de otros.
+  if (uid !== req.usuario.uid && req.usuario.nivel < NIVEL.ADMIN) {
+    return res.status(403).json({ error: 'No tienes permiso para esta acción' });
   }
 
   try {
@@ -749,7 +767,7 @@ app.get('/api/saldo/:uid', async (req, res) => {
 
 
 // ==================== ENDPOINT HF CUOTAS (sin bartender) ====================
-app.post('/api/huggingface/cuotas', async (req, res) => {
+app.post('/api/huggingface/cuotas', soloCEO, limiteIA, async (req, res) => {
   const { prompt, modelo } = req.body;
   if (!prompt) return res.status(400).json({ error: 'Falta prompt' });
   const model = modelo || HF_MODELS.analisis;
@@ -776,7 +794,7 @@ app.post('/api/huggingface/cuotas', async (req, res) => {
 
 
 
-app.get('/api/agents-status', async (req, res) => {
+app.get('/api/agents-status', soloCEO, async (req, res) => {
   const geminiKey = config.geminiKey;
   const groqKey   = config.groqKey;
   const status = { Geminis02: 'unknown', Agente_groc01: 'unknown', Athos_Tavily: 'unknown' };
@@ -811,9 +829,9 @@ app.get('/api/agents-status', async (req, res) => {
 
 // ==================== CHATBOT AGENTE_GROC01 ====================
 
-app.post('/api/chat', async (req, res) => {
-  const { mensaje } = req.body;
-  if (!mensaje || typeof mensaje !== 'string' || mensaje.trim().length === 0) {
+app.post('/api/chat', requerirSesion, limiteIA, async (req, res) => {
+  const mensaje = validar.texto(req.body?.mensaje, 500);
+  if (!mensaje) {
     return res.status(400).json({ error: 'Mensaje vacío o inválido' });
   }
   const groqKey = config.groqKey;
@@ -932,7 +950,7 @@ async function notificarTelegram(texto) {
   } catch(e) { console.error('Error notificando a Telegram:', e.message); }
 }
 
-app.get('/api/verificacion-geminis', async (req, res) => {
+app.get('/api/verificacion-geminis', soloCEO, async (req, res) => {
   try {
     const estado = { proxy: 'ok', agentes: {}, eventos: 0, chatbot: false, saldo_firebase: null, saldo_endpoint: null };
     
@@ -974,11 +992,16 @@ app.get('/api/verificacion-geminis', async (req, res) => {
 
 
 // ==================== LIQUIDACIÓN DE APUESTAS (TRANSACCIONAL) ====================
-app.post('/api/apuestas/liquidar', async (req, res) => {
-  const { partidoId, resultadoGanador } = req.body;
+app.post('/api/apuestas/liquidar', soloCEO, async (req, res) => {
+  const partidoId = validar.texto(req.body?.partidoId, 200);
+  const resultadoGanador = validar.tipoApuesta(req.body?.resultadoGanador);
   if (!partidoId || !resultadoGanador) {
-    return res.status(400).json({ error: 'partidoId y resultadoGanador requeridos' });
+    return res.status(400).json({ error: 'partidoId y resultadoGanador (Local, Visitante o Empate) requeridos' });
   }
+  await auditoria.registrarSeguro({
+    accion: 'liquidacion_manual', actor: req.usuario.uid, objetivo: partidoId,
+    requestId: req.id, detalles: { resultadoGanador }
+  });
   try {
     const snapshot = await db.ref('apuestas').once('value');
     if (!snapshot.exists()) {
@@ -1051,8 +1074,16 @@ app.post('/api/apuestas/liquidar', async (req, res) => {
 
 
 // ==================== REINICIO DEL SISTEMA (MULTI-NODO) ====================
-app.post('/api/admin/reiniciar', async (req, res) => {
+app.post('/api/admin/reiniciar', soloCEO, async (req, res) => {
+  // Borra TODO. Apagado salvo ALLOW_SYSTEM_RESET=true y confirmación escrita.
+  if (!config.permitirReinicio) {
+    return res.status(403).json({ error: 'El reinicio del sistema está desactivado' });
+  }
+  if (req.body?.confirmacion !== 'BORRAR TODO EL SISTEMA') {
+    return res.status(400).json({ error: 'Falta la confirmación escrita' });
+  }
   try {
+    await auditoria.registrar({ accion: 'reinicio_sistema', actor: req.usuario.uid, requestId: req.id });
     const updates = {
       'apuestas': null,
       'historial': null,
@@ -1079,15 +1110,25 @@ app.post('/api/admin/reiniciar', async (req, res) => {
 
 
 // ==================== REFERIDOS FILTRADOS POR SUBADMIN ====================
-app.get('/api/usuarios/mis-referidos', async (req, res) => {
-  const subadminUid = req.query.subadminUid;
-  if (!subadminUid) return res.status(400).json({ error: 'subadminUid requerido' });
+app.get('/api/usuarios/mis-referidos', requerirSesion, requerirNivel(NIVEL.SUBADMIN), async (req, res) => {
+  // Un subadmin solo ve a los suyos; el CEO puede consultar los de cualquiera.
+  const pedido = req.query.subadminUid;
+  const subadminUid = req.usuario.nivel >= NIVEL.CEO && validar.esUid(pedido) ? pedido : req.usuario.uid;
   try {
     const snapshot = await db.ref('users')
       .orderByChild('creadoPor')
       .equalTo(subadminUid)
       .once('value');
-    const referidos = snapshot.val() ? Object.values(snapshot.val()) : [];
+    // Solo los campos que el panel necesita: nunca hash, sal ni datos bancarios.
+    const referidos = Object.entries(snapshot.val() || {}).map(([uid, u]) => ({
+      uid,
+      nombre: u.nombre || null,
+      telefono: u.telefono || null,
+      creditoReal: Number(u.creditoReal) || 0,
+      creditoPromo: Number(u.creditoPromo) || 0,
+      activo: u.activo !== false,
+      fecha_registro: u.fecha_registro || null
+    }));
     res.json(referidos);
   } catch (error) {
     responderError(res, req, error, '/api/usuarios/mis-referidos');
@@ -1098,8 +1139,12 @@ app.get('/api/usuarios/mis-referidos', async (req, res) => {
 
 
 // ==================== GENERAR CÓDIGO POR INICIAL DEL ROL ====================
-app.get('/api/admin/generar-codigo', async (req, res) => {
-  const { rol = 'ceo' } = req.query;
+const NIVEL_DE_CODIGO = Object.freeze({ ceo: 3, admin: 2.5, moderador: 2.5, soporte: 2 });
+const CODIGO_RE = /^[CAMS][0-9]{10}[0-9A-F]{12}$/;
+const CODIGO_VIGENCIA_MS = 24 * 60 * 60 * 1000;
+
+app.post('/api/admin/generar-codigo', soloCEO, async (req, res) => {
+  const rol = req.body?.rol || 'ceo';
   const rolesValidos = ['ceo', 'admin', 'moderador', 'soporte'];
   if (!rolesValidos.includes(rol)) return res.status(400).json({ error: 'Rol no válido' });
 
@@ -1111,28 +1156,50 @@ app.get('/api/admin/generar-codigo', async (req, res) => {
   const minuto = String(ahora.getMinutes()).padStart(2, '0');
   const rolInicial = rol.charAt(0).toUpperCase();
   const fecha = `${dia}${mes}${año}${hora}${minuto}`;
-  const random = Math.random().toString(36).substring(2, 6).toUpperCase();
+  // 48 bits aleatorios criptográficos: imposible de adivinar.
+  const random = crypto.randomBytes(6).toString('hex').toUpperCase();
   const codigo = `${rolInicial}${fecha}${random}`;
 
-  res.json({ success: true, codigo, rol, formato: `${rolInicial}[DÍA][MES][AÑO][HORA][MINUTO][RANDOM_4]` });
+  try {
+    // El código se guarda: solo funcionan los que se generaron aquí, una sola vez y durante 24 h.
+    await db.ref(`codigosRol/${codigo}`).set({
+      rol, creadoPor: req.usuario.uid, creado: Date.now(), expira: Date.now() + CODIGO_VIGENCIA_MS, usado: false
+    });
+    await auditoria.registrarSeguro({ accion: 'codigo_rol_generado', actor: req.usuario.uid, requestId: req.id, detalles: { rol } });
+    res.json({ success: true, codigo, rol, expiraEnHoras: 24 });
+  } catch (err) {
+    responderError(res, req, err, '/api/admin/generar-codigo');
+  }
 });
 // ==================== FIN GENERAR CÓDIGO ====================
 
 
 
 // ==================== APLICAR CÓDIGO CEO ====================
-app.post('/api/admin/aplicar-codigo', async (req, res) => {
-  const { codigo, uid } = req.body;
-  if (!codigo || !uid) return res.status(400).json({ error: 'Código o UID faltante' });
+app.post('/api/admin/aplicar-codigo', requerirSesion, limiteIA, async (req, res) => {
+  // El código se aplica a quien tiene la sesión abierta, nunca a un uid del cuerpo.
+  const uid = req.usuario.uid;
+  const codigo = typeof req.body?.codigo === 'string' ? req.body.codigo.trim().toUpperCase() : '';
+  if (!CODIGO_RE.test(codigo)) return res.status(400).json({ error: 'Código no válido' });
 
-  const rolMap = { 'C': 'ceo', 'A': 'admin', 'M': 'moderador', 'S': 'soporte' };
-  const rol = rolMap[codigo.charAt(0)];
-  if (!rol) return res.status(400).json({ error: 'Código no válido' });
+  try {
+    let rol = null;
+    const resultado = await db.ref(`codigosRol/${codigo}`).transaction((c) => {
+      if (!c || c.usado || !(c.expira > Date.now()) || !NIVEL_DE_CODIGO[c.rol]) return undefined;
+      rol = c.rol;
+      return { ...c, usado: true, usadoPor: uid, usadoEn: Date.now() };
+    });
+    if (!resultado.committed || !rol) {
+      await auditoria.registrarSeguro({ accion: 'codigo_rol_rechazado', actor: uid, requestId: req.id });
+      return res.status(400).json({ error: 'Código no válido, usado o caducado' });
+    }
 
-  await db.ref(`users/${uid}/rol`).set(rol);
-  await db.ref(`auditLog/${Date.now()}`).set({ accion: 'rol_asignado', uid, rol, codigo, fecha: new Date().toISOString() });
-
-  res.json({ success: true, uid, rol, mensaje: `Rol "${rol}" asignado al usuario ${uid}` });
+    await db.ref(`users/${uid}`).update({ rol, rolLevel: NIVEL_DE_CODIGO[rol] });
+    await auditoria.registrarSeguro({ accion: 'rol_asignado', actor: uid, objetivo: uid, requestId: req.id, detalles: { rol } });
+    res.json({ success: true, rol, mensaje: `Rol "${rol}" asignado` });
+  } catch (err) {
+    responderError(res, req, err, '/api/admin/aplicar-codigo');
+  }
 });
 // ==================== FIN APLICAR CÓDIGO ====================
 
@@ -1169,8 +1236,11 @@ const HF_MODELS = {
   rapido: 'Qwen/Qwen2.5-7B-Instruct'
 };
 
-app.post('/api/huggingface', async (req, res) => {
-  const { prompt, tarea, rol } = req.body;
+app.post('/api/huggingface', requerirSesion, limiteIA, async (req, res) => {
+  const prompt = validar.texto(req.body?.prompt, 1000);
+  const tarea = req.body?.tarea;
+  // El rol que ve la IA sale de la base de datos, no de lo que diga el cliente.
+  const rol = req.usuario.datos.rol || 'member';
   if (!prompt) return res.status(400).json({ error: 'Falta prompt' });
   const model = HF_MODELS[tarea] || HF_MODELS['rapido'];
 
@@ -1249,12 +1319,14 @@ El usuario actual tiene rol: ${rol || 'miembro'}.`;
 
 
 // ════ POST /api/enriquecer ════
-app.post('/api/enriquecer', async (req, res) => {
+app.post('/api/enriquecer', requerirSesion, limiteIA, async (req, res) => {
   try {
-    const { eventos } = req.body;
-    if (!Array.isArray(eventos) || eventos.length === 0) {
-      return res.status(400).json({ error: 'Se requiere array de eventos' });
+    const recibidos = req.body?.eventos;
+    if (!Array.isArray(recibidos) || recibidos.length === 0 || recibidos.length > 150) {
+      return res.status(400).json({ error: 'Se requiere un array de 1 a 150 eventos' });
     }
+    const eventos = recibidos.map(validar.eventoCliente).filter(Boolean);
+    if (eventos.length === 0) return res.status(400).json({ error: 'Ningún evento válido' });
     const enriquecidos = await enriquecerConCuotas(eventos);
     res.json({ status: 'success', total: enriquecidos.length, data: enriquecidos });
   } catch(err) {
@@ -1467,7 +1539,7 @@ function programarReportes() {
   console.log('Sistema automatizado: reportes 8am/2pm Cuba, liquidacion 30min, monitoreo 24h.');
 }
 // ════ MONITOREO DEL SISTEMA ════
-app.get('/api/estado-sistema', async (req, res) => {
+app.get('/api/estado-sistema', soloCEO, async (req, res) => {
   const estado = {
     timestamp: new Date().toISOString(),
     proxy: 'online',
@@ -1496,7 +1568,7 @@ app.get('/api/estado-sistema', async (req, res) => {
 });
 
 // ENDPOINT DE PRUEBA - disparar reporte manualmente
-app.post('/api/test-reporte', async (req, res) => {
+app.post('/api/test-reporte', soloCEO, async (req, res) => {
   try {
     await enviarReporteTelegram();
     res.json({ success: true, message: 'Reporte enviado a Telegram.' });
@@ -1506,7 +1578,7 @@ app.post('/api/test-reporte', async (req, res) => {
 });
 
 // ENDPOINT DEBUG - ver que eventos tiene el reporte
-app.get('/api/debug-reporte', async (req, res) => {
+app.get('/api/debug-reporte', soloCEO, async (req, res) => {
   try {
     const fixtures = getCache('fixtures');
     const cacheEvs = fixtures && fixtures.data ? fixtures.data.length : 0;
