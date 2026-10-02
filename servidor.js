@@ -454,6 +454,53 @@ const HORIZONTE_CUOTAS_MS = 48 * 60 * 60 * 1000;
 // Último dato de créditos que quedan en The Odds API (para el diagnóstico del CEO).
 const estadoOddsApi = { restantes: null, usados: null, actualizado: null, ultimoError: null };
 
+const sportKeyMap = Object.freeze({
+  'soccer': function(liga, ruta) {
+    if (ruta && ODDS_POR_RUTA[ruta]) return ODDS_POR_RUTA[ruta];
+    const l = (liga || '').toLowerCase();
+    if (l.includes('world') || l.includes('fifa')) return 'soccer_fifa_world_cup';
+    if (l.includes('mls')) return 'soccer_usa_mls';
+    if (l.includes('bundesliga') && l.includes('2')) return 'soccer_germany_bundesliga2';
+    if (l.includes('bundesliga')) return 'soccer_germany_bundesliga';
+    if (l.includes('premier') || l.includes('epl')) return 'soccer_epl';
+    if (l.includes('la liga') || l.includes('spain')) return 'soccer_spain_la_liga';
+    if (l.includes('serie a') || l.includes('italy')) return 'soccer_italy_serie_a';
+    if (l.includes('ligue 1') || l.includes('france')) return 'soccer_france_ligue_one';
+    if (l.includes('libertadores')) return 'soccer_conmebol_copa_libertadores';
+    if (l.includes('sudamericana')) return 'soccer_conmebol_copa_sudamericana';
+    if (l.includes('brazil') || l.includes('brasil')) return 'soccer_brazil_campeonato';
+    if (l.includes('liga mx') || l.includes('mexico')) return 'soccer_mexico_ligamx';
+    if (l.includes('eredivisie') || l.includes('netherlands')) return 'soccer_netherlands_eredivisie';
+    if (l.includes('argentina')) return 'soccer_argentina_primera_division';
+    if (l.includes('portugal')) return 'soccer_portugal_primeira_liga';
+    if (l.includes('chile')) return 'soccer_chile_campeonato';
+    if (l.includes('norway') || l.includes('eliteserien')) return 'soccer_norway_eliteserien';
+    if (l.includes('sweden') || l.includes('allsvenskan')) return 'soccer_sweden_allsvenskan';
+    if (l.includes('superettan')) return 'soccer_sweden_superettan';
+    if (l.includes('denmark') || l.includes('superliga')) return 'soccer_denmark_superliga';
+    if (l.includes('poland') || l.includes('ekstraklasa')) return 'soccer_poland_ekstraklasa';
+    if (l.includes('russia')) return 'soccer_russia_premier_league';
+    if (l.includes('switzerland') || l.includes('swiss')) return 'soccer_switzerland_superleague';
+    if (l.includes('china')) return 'soccer_china_superleague';
+    if (l.includes('korea') || l.includes('k league')) return 'soccer_korea_kleague1';
+    if (l.includes('finland') || l.includes('veikkausliiga')) return 'soccer_finland_veikkausliiga';
+    if (l.includes('scotland')) return 'soccer_spl';
+    if (l.includes('belgium')) return 'soccer_belgium_first_div';
+    if (l.includes('austria')) return 'soccer_austria_bundesliga';
+    if (l.includes('greece')) return 'soccer_greece_super_league';
+    return null; // liga desconocida: no se gastan créditos pidiendo otra liga que no es
+  },
+  'basketball': 'basketball_nba',
+  'baseball': 'baseball_mlb',
+  'mma': 'mma_mixed_martial_arts',
+  'tennis': function(liga){ return (liga && liga.toLowerCase().includes('wta')) ? 'tennis_wta_wimbledon' : 'tennis_atp_wimbledon'; }
+});
+// Competición de The Odds API para un partido (null = no se piden cuotas).
+function claveOdds(evento) {
+  const v = sportKeyMap[evento.sport];
+  return (typeof v === 'function' ? v(evento.liga, evento.ruta) : v) || null;
+}
+
 async function enriquecerConCuotas(eventos) {
   const apiKey = getApiKey();
   if (!apiKey) {
@@ -461,54 +508,11 @@ async function enriquecerConCuotas(eventos) {
     return eventos;
   }
 
-  const sportKeyMap = {
-    'soccer': function(liga, ruta) {
-      if (ruta && ODDS_POR_RUTA[ruta]) return ODDS_POR_RUTA[ruta];
-      const l = (liga || '').toLowerCase();
-      if (l.includes('world') || l.includes('fifa')) return 'soccer_fifa_world_cup';
-      if (l.includes('mls')) return 'soccer_usa_mls';
-      if (l.includes('bundesliga') && l.includes('2')) return 'soccer_germany_bundesliga2';
-      if (l.includes('bundesliga')) return 'soccer_germany_bundesliga';
-      if (l.includes('premier') || l.includes('epl')) return 'soccer_epl';
-      if (l.includes('la liga') || l.includes('spain')) return 'soccer_spain_la_liga';
-      if (l.includes('serie a') || l.includes('italy')) return 'soccer_italy_serie_a';
-      if (l.includes('ligue 1') || l.includes('france')) return 'soccer_france_ligue_one';
-      if (l.includes('libertadores')) return 'soccer_conmebol_copa_libertadores';
-      if (l.includes('sudamericana')) return 'soccer_conmebol_copa_sudamericana';
-      if (l.includes('brazil') || l.includes('brasil')) return 'soccer_brazil_campeonato';
-      if (l.includes('liga mx') || l.includes('mexico')) return 'soccer_mexico_ligamx';
-      if (l.includes('eredivisie') || l.includes('netherlands')) return 'soccer_netherlands_eredivisie';
-      if (l.includes('argentina')) return 'soccer_argentina_primera_division';
-      if (l.includes('portugal')) return 'soccer_portugal_primeira_liga';
-      if (l.includes('chile')) return 'soccer_chile_campeonato';
-      if (l.includes('norway') || l.includes('eliteserien')) return 'soccer_norway_eliteserien';
-      if (l.includes('sweden') || l.includes('allsvenskan')) return 'soccer_sweden_allsvenskan';
-      if (l.includes('superettan')) return 'soccer_sweden_superettan';
-      if (l.includes('denmark') || l.includes('superliga')) return 'soccer_denmark_superliga';
-      if (l.includes('poland') || l.includes('ekstraklasa')) return 'soccer_poland_ekstraklasa';
-      if (l.includes('russia')) return 'soccer_russia_premier_league';
-      if (l.includes('switzerland') || l.includes('swiss')) return 'soccer_switzerland_superleague';
-      if (l.includes('china')) return 'soccer_china_superleague';
-      if (l.includes('korea') || l.includes('k league')) return 'soccer_korea_kleague1';
-      if (l.includes('finland') || l.includes('veikkausliiga')) return 'soccer_finland_veikkausliiga';
-      if (l.includes('scotland')) return 'soccer_spl';
-      if (l.includes('belgium')) return 'soccer_belgium_first_div';
-      if (l.includes('austria')) return 'soccer_austria_bundesliga';
-      if (l.includes('greece')) return 'soccer_greece_super_league';
-      return null; // liga desconocida: no se gastan créditos pidiendo otra liga que no es
-    },
-    'basketball': 'basketball_nba',
-    'baseball': 'baseball_mlb',
-    'mma': 'mma_mixed_martial_arts',
-    'tennis': function(liga){ return (liga && liga.toLowerCase().includes('wta')) ? 'tennis_wta_wimbledon' : 'tennis_atp_wimbledon'; }
-  };
 
   // Agrupar eventos por sportKey
   const grupos = {};
   for (const evento of eventos) {
-    const sportKey = typeof sportKeyMap[evento.sport] === 'function' 
-      ? sportKeyMap[evento.sport](evento.liga, evento.ruta) 
-      : sportKeyMap[evento.sport];
+    const sportKey = claveOdds(evento);
     if (!sportKey) continue;
     if (!grupos[sportKey]) grupos[sportKey] = [];
     grupos[sportKey].push(evento);
@@ -796,13 +800,21 @@ app.get('/api/admin/diagnostico-cuotas', soloCEO, operacion(async (req) => {
   return {
     creditosOddsApi: estadoOddsApi,
     partidos: eventos.map(e => {
-      const sportKey = e.sport === 'soccer' ? (ODDS_POR_RUTA[e.ruta] || null) : null;
+      const sportKey = claveOdds(e);
       const juegos = (sportKey && oddsCache[sportKey]?.data) || [];
       const candidatos = juegos
         .map(g => ({ partidoOddsApi: `${g.home_team} vs ${g.away_team}`, inicio: g.commence_time, casas: g.casas ?? (g.bookmakers || []).length, parecido: Number(coincideEquipo(e, g).score.toFixed(2)) }))
         .sort((a, b) => b.parecido - a.parecido).slice(0, q === 'sincuota' ? 1 : 3);
+      // Explicación en palabras de por qué tiene (o no) cuota.
+      const faltaMs = Date.parse(e.horaInicio || '') - Date.now();
+      let motivo;
+      if (Number(e.cuota_local) > 1) motivo = 'Tiene cuota';
+      else if (!sportKey) motivo = 'Esta competición no está conectada a The Odds API';
+      else if (faltaMs > HORIZONTE_CUOTAS_MS && !juegos.length) motivo = 'Faltan más de 48 h: las cuotas se piden 2 días antes del partido (ahorro de créditos)';
+      else if (!juegos.length) motivo = 'The Odds API no devolvió partidos de esta competición (o no quedan créditos)';
+      else motivo = 'Ningún partido de The Odds API coincide (revisar nombres en mejoresCandidatos)';
       return {
-        partido: `${e.local} vs ${e.visitante}`, liga: e.liga, ruta: e.ruta, inicio: e.horaInicio,
+        partido: `${e.local} vs ${e.visitante}`, liga: e.liga, ruta: e.ruta, inicio: e.horaInicio, motivo,
         competicionOddsApi: sportKey, region: sportKey ? regionDeCuotas(sportKey) : null,
         cuotas: { local: e.cuota_local, empate: e.cuota_empate, visitante: e.cuota_visitante },
         partidosEnOddsApi: juegos.length,
