@@ -906,37 +906,31 @@ Pregunta del usuario: "${mensaje.trim()}"`;
 
 // ==================== VERIFICADOR GEMINIS02 ====================
 
+// Revisa este mismo servidor desde dentro (antes llamaba a una URL de Render equivocada).
 async function obtenerEstadoSistema() {
-  const estado = { proxy: 'ok', agentes: {}, eventos: 0, chatbot: false, saldo_firebase: null, saldo_endpoint: null };
-  try {
-    const agents = await axios.get('https://betgroup-proxy-v2.onrender.com/api/agents-status', { timeout: 5000 });
-    estado.agentes = agents.data?.agents || {};
-  } catch(e) { estado.agentes = { error: 'no disponible' }; }
+  const estado = { proxy: 'ok', agentes: {}, eventos: 0, chatbot: false, saldo_firebase: null };
+  estado.agentes = {
+    Geminis02: config.geminiKey ? 'configurado' : 'sin_clave',
+    Agente_groc01: config.groqKey ? 'configurado' : 'sin_clave',
+    Athos_Tavily: config.tavilyKey ? 'configurado' : 'sin_clave'
+  };
+  const fixtures = getCache('fixtures');
+  estado.eventos = fixtures && fixtures.total ? fixtures.total : 0;
+  estado.chatbot = Boolean(config.groqKey);
 
-  try {
-    const fixtures = await axios.get('https://betgroup-proxy-v2.onrender.com/api/fixtures', { timeout: 5000 });
-    estado.eventos = fixtures.data?.total || 0;
-  } catch(e) { estado.eventos = -1; }
-
-  try {
-    const chat = await axios.post('https://betgroup-proxy-v2.onrender.com/api/chat',
-      { mensaje: 'Test' }, { timeout: 5000 });
-    estado.chatbot = chat.data?.success || false;
-  } catch(e) { estado.chatbot = false; }
-
-  // Leer saldo de usuario de prueba directamente desde Firebase
-  try {
-    const snap = await db.ref('users/BG_mq7rch3t_h6sjfs1h/creditoReal').once('value');
-    estado.saldo_firebase = snap.val();
-  } catch(e) { estado.saldo_firebase = 'error'; }
-
-  // Leer saldo desde el endpoint /api/saldo
-  try {
-    const resp = await axios.get('https://betgroup-proxy-v2.onrender.com/api/saldo/BG_mq7rch3t_h6sjfs1h', { timeout: 5000 });
-    estado.saldo_endpoint = resp.data?.creditoReal;
-  } catch(e) { estado.saldo_endpoint = 'error'; }
-
+  // Saldo del usuario de prueba (TEST_USER_UID), leído directamente de Firebase.
+  if (config.uidPrueba) {
+    try {
+      const snap = await db.ref(`users/${config.uidPrueba}/creditoReal`).once('value');
+      estado.saldo_firebase = snap.val();
+    } catch(e) { estado.saldo_firebase = 'error'; }
+  }
   return estado;
+}
+
+// Los mensajes van con parse_mode HTML: el texto de usuarios se escapa antes.
+function escaparHtml(t) {
+  return String(t).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 }
 
 async function notificarTelegram(texto) {
@@ -952,25 +946,11 @@ async function notificarTelegram(texto) {
 
 app.get('/api/verificacion-geminis', soloCEO, async (req, res) => {
   try {
-    const estado = { proxy: 'ok', agentes: {}, eventos: 0, chatbot: false, saldo_firebase: null, saldo_endpoint: null };
-    
-    const [agentsResp, fixturesResp, chatResp, saldoFB, saldoEP] = await Promise.allSettled([
-      axios.get('https://betgroup-proxy-v2.onrender.com/api/agents-status', { timeout: 3000 }),
-      axios.get('https://betgroup-proxy-v2.onrender.com/api/fixtures', { timeout: 3000 }),
-      axios.post('https://betgroup-proxy-v2.onrender.com/api/chat', { mensaje: 'Test' }, { timeout: 3000 }),
-      db.ref('users/BG_mq7rch3t_h6sjfs1h/creditoReal').once('value'),
-      axios.get('https://betgroup-proxy-v2.onrender.com/api/saldo/BG_mq7rch3t_h6sjfs1h', { timeout: 3000 })
-    ]);
-
-    if (agentsResp.status === 'fulfilled') estado.agentes = agentsResp.value.data?.agents || {};
-    if (fixturesResp.status === 'fulfilled') estado.eventos = fixturesResp.value.data?.total || 0;
-    if (chatResp.status === 'fulfilled') estado.chatbot = chatResp.value.data?.success || false;
-    if (saldoFB.status === 'fulfilled') estado.saldo_firebase = saldoFB.value.val();
-    if (saldoEP.status === 'fulfilled') estado.saldo_endpoint = saldoEP.value.data?.creditoReal;
+    const estado = await obtenerEstadoSistema();
 
     // Formato exacto del curl funcional
     const geminiKey = config.geminiKey;
-    let informe = 'Sistema operativo. Saldo Firebase: ' + estado.saldo_firebase + ' | Saldo endpoint: ' + estado.saldo_endpoint;
+    let informe = 'Sistema operativo. Eventos: ' + estado.eventos + ' | Saldo de prueba: ' + estado.saldo_firebase;
     
     try {
       const resp = await axios.post(
@@ -1028,26 +1008,20 @@ app.post('/api/apuestas/liquidar', soloCEO, async (req, res) => {
           await userRef.transaction(current => (current || 0) + premio);
           const NL = String.fromCharCode(10);
           const montoApostado = parseFloat(apuesta.monto);
-          const userSnap = await db.ref('users/' + uid).once('value');
-          const userData = userSnap.val() || {};
-          const saldoActual = userData.creditoReal || 0;
-          const nombreUsuario = userData.nombre || 'Usuario';
-          const emailUsuario = userData.email || '';
-          const telefonoUsuario = (userData.datosBancarios && userData.datosBancarios.telefono) ? userData.datosBancarios.telefono : '';
+          // Al grupo de Telegram solo va el nombre de pila: nunca email, teléfono ni saldo.
+          const userSnap = await db.ref('users/' + uid + '/nombre').once('value');
+          const nombreUsuario = escaparHtml(String(userSnap.val() || 'Usuario').split(' ')[0]);
           let msgGanada = '';
           msgGanada += '🏆 APUESTA GANADA 🏆' + NL;
           msgGanada += '━━━━━━━━━━━━━━━━━━━━━━' + NL;
           msgGanada += '👤 Usuario: ' + nombreUsuario + NL;
-          msgGanada += '📧 Email: ' + emailUsuario + NL;
-          if (telefonoUsuario) { msgGanada += '📱 Tel: ' + telefonoUsuario + NL; }
           msgGanada += '━━━━━━━━━━━━━━━━━━━━━━' + NL;
-          msgGanada += '⚽ Evento: ' + apuesta.eventoNombre + NL;
+          msgGanada += '⚽ Evento: ' + escaparHtml(apuesta.eventoNombre) + NL;
           msgGanada += '🎯 Seleccion: ' + apuesta.tipo + NL;
           msgGanada += '📊 Cuota: x' + parseFloat(apuesta.cuota).toFixed(2) + NL;
           msgGanada += '━━━━━━━━━━━━━━━━━━━━━━' + NL;
           msgGanada += '💵 Monto apostado: $' + montoApostado.toFixed(2) + NL;
           msgGanada += '💰 Ganancia: $' + premio.toFixed(2) + NL;
-          msgGanada += '🏦 Saldo actual: $' + saldoActual.toFixed(2) + NL;
           msgGanada += '━━━━━━━━━━━━━━━━━━━━━━' + NL;
           msgGanada += '🎉 Felicitaciones ' + nombreUsuario + '! La suerte estuvo de tu lado!' + NL;
           msgGanada += '🔥 Sigue apostando en BetGroup Pro!';
@@ -1450,13 +1424,13 @@ async function liquidarApuestasAutomatico() {
               if (gano) {
                 const premio = parseFloat(ap.monto) * parseFloat(ap.cuota);
                 await db.ref('users/' + uid + '/creditoReal').transaction(function(cur){ return (cur || 0) + premio; });
-                const uSnap = await db.ref('users/' + uid).once('value');
-                const u = uSnap.val() || {};
+                const uSnap = await db.ref('users/' + uid + '/nombre').once('value');
+                const u = { nombre: uSnap.val() ? escaparHtml(String(uSnap.val()).split(' ')[0]) : null };
                 const NL2 = String.fromCharCode(10);
                 const sep = '------------------------';
                 let msg = 'APUESTA GANADA' + NL2 + sep + NL2;
-                msg += 'Usuario: ' + (u.nombre || uid) + NL2;
-                msg += 'Evento: ' + ap.eventoNombre + NL2;
+                msg += 'Usuario: ' + (u.nombre || 'Usuario') + NL2;
+                msg += 'Evento: ' + escaparHtml(ap.eventoNombre) + NL2;
                 msg += 'Seleccion: ' + ap.tipo + ' | Cuota: x' + parseFloat(ap.cuota).toFixed(2) + NL2;
                 msg += 'Apostado: $' + parseFloat(ap.monto).toFixed(2) + ' | Ganancia: $' + premio.toFixed(2) + NL2;
                 msg += 'Felicitaciones ' + (u.nombre || 'campeon') + '! Sigue en BetGroup Pro!';
