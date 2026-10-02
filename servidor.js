@@ -5,6 +5,7 @@ const admin = require('firebase-admin');
 const axios = require('axios');
 
 const crypto = require('crypto');
+const { limpiarMetadatos } = require('./limpiarMetadatos');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -1559,6 +1560,97 @@ app.get('/api/debug-reporte', requireAdmin, async (req, res) => {
     res.json({ error: 'Error interno' });
   }
 });
+
+// ==================== AVISOS E IMÁGENES PARA EL FRONTEND ====================
+// El navegador ya no lleva las claves de Telegram ni de ImgBB: pasa por aquí.
+
+const TEXTO_MAXIMO_TELEGRAM = 3500;
+
+app.post('/api/notificar', limitarPeticiones(15, 60 * 1000), async (req, res) => {
+  const { texto } = req.body || {};
+  if (typeof texto !== 'string' || texto.trim().length === 0 || texto.length > TEXTO_MAXIMO_TELEGRAM) {
+    return res.status(400).json({ error: 'Texto inválido' });
+  }
+  if (!TELEGRAM_BOT_TOKEN || !TELEGRAM_CHAT_ID) {
+    return res.status(503).json({ error: 'Avisos no configurados' });
+  }
+  try {
+    await axios.post(`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage`, {
+      chat_id: TELEGRAM_CHAT_ID, text: texto, parse_mode: 'HTML'
+    }, { timeout: 8000 });
+    res.json({ success: true });
+  } catch (err) {
+    console.error('Error /api/notificar:', err.message);
+    res.status(502).json({ error: 'No se pudo enviar el aviso' });
+  }
+});
+
+// Solo se aceptan fotos alojadas en ImgBB (las que sube /api/subir-imagen)
+const URL_FOTO_PERMITIDA = /^https:\/\/i\.ibb\.co\/[A-Za-z0-9/_.-]+$/;
+
+app.post('/api/notificar-foto', limitarPeticiones(10, 60 * 1000), async (req, res) => {
+  const { url, texto } = req.body || {};
+  if (typeof url !== 'string' || !URL_FOTO_PERMITIDA.test(url) ||
+      (texto !== undefined && (typeof texto !== 'string' || texto.length > 1000))) {
+    return res.status(400).json({ error: 'Datos inválidos' });
+  }
+  if (!TELEGRAM_BOT_TOKEN || !TELEGRAM_CHAT_ID) {
+    return res.status(503).json({ error: 'Avisos no configurados' });
+  }
+  try {
+    await axios.post(`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendPhoto`, {
+      chat_id: TELEGRAM_CHAT_ID, photo: url, caption: texto || ''
+    }, { timeout: 8000 });
+    res.json({ success: true });
+  } catch (err) {
+    console.error('Error /api/notificar-foto:', err.message);
+    res.status(502).json({ error: 'No se pudo enviar la foto' });
+  }
+});
+
+const IMGBB_API_KEY = process.env.IMGBB_API_KEY || '';
+const IMAGEN_MAXIMA_BYTES = 5 * 1024 * 1024;
+
+app.post('/api/subir-imagen',
+  limitarPeticiones(10, 60 * 1000),
+  express.json({ limit: '8mb' }),
+  async (req, res) => {
+    const { imagenBase64 } = req.body || {};
+    if (typeof imagenBase64 !== 'string' || imagenBase64.length === 0) {
+      return res.status(400).json({ error: 'Imagen requerida' });
+    }
+    if (!IMGBB_API_KEY) {
+      return res.status(503).json({ error: 'Subida de imágenes no configurada' });
+    }
+    let limpia;
+    try {
+      // Admite "data:image/...;base64,XXXX" o solo el base64
+      const base64 = imagenBase64.replace(/^data:image\/[a-z+]+;base64,/i, '');
+      const original = Buffer.from(base64, 'base64');
+      if (original.length === 0 || original.length > IMAGEN_MAXIMA_BYTES) {
+        return res.status(400).json({ error: 'La imagen debe pesar menos de 5 MB' });
+      }
+      limpia = limpiarMetadatos(original).datos;
+    } catch (err) {
+      return res.status(400).json({ error: 'Formato no permitido: usa JPG, PNG o WEBP' });
+    }
+    try {
+      const formulario = new URLSearchParams();
+      formulario.append('image', limpia.toString('base64'));
+      const resp = await axios.post(
+        `https://api.imgbb.com/1/upload?key=${encodeURIComponent(IMGBB_API_KEY)}`,
+        formulario.toString(),
+        { headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, timeout: 20000, maxBodyLength: 12 * 1024 * 1024 }
+      );
+      const url = resp.data?.data?.url;
+      if (!url) throw new Error('ImgBB no devolvió URL');
+      res.json({ success: true, url });
+    } catch (err) {
+      console.error('Error /api/subir-imagen:', err.message);
+      res.status(502).json({ error: 'No se pudo subir la imagen' });
+    }
+  }
+);
 
 app.listen(PORT, () => {
   console.log(`✅ Proxy escuchando en puerto ${PORT}`);
