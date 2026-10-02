@@ -28,6 +28,9 @@ for (let i = 1; i <= 6; i++) {
   set(`apuestas/BG_j${i}/a`, { monto: 1000, cuota: 2, estado: 'perdida', pago: 0, fecha: tp, liquidadaEn: tp, tipoSaldo: 'real' });
 }
 set('apuestas/BG_j1/b', { monto: 1000, cuota: 2, estado: 'ganada', pago: 2000, fecha: tp, liquidadaEn: tp, tipoSaldo: 'real' }); // ganancia red = 6000 − 1000 = 5000
+// Sara conserva un cliente propio: esta semana pierde 1.000 → como agente cobra 5 % = 50.
+usuario('BG_sc', 'sc@x.com', { nombre: 'Cliente de Sara', rol: 'member', rolLevel: 1, referidoPorUid: 'BG_SUP' });
+set('apuestas/BG_sc/d', { monto: 1000, cuota: 2, estado: 'perdida', pago: 0, fecha: Date.now(), liquidadaEn: Date.now(), tipoSaldo: 'real' });
 set('apuestas/BG_j2/c', { monto: 300, cuota: 2, estado: 'perdida', pago: 0, fecha: Date.now(), liquidadaEn: Date.now(), tipoSaldo: 'real' }); // esta semana
 set('config', { minBet: 100, maxBet: 500 });
 arrancar({ puerto: PUERTO_API, env: { ODDS_API_KEYS: '', ALLOWED_ORIGINS: `http://127.0.0.1:${PUERTO_WEB}` } });
@@ -107,7 +110,12 @@ http.createServer((req, res) => {
     await entrar('sup@x.com');
     await pagina.evaluate(() => goPanel('director'));
     await pagina.waitForSelector('#supComisionCard >> text=Andres', { timeout: 15000 });
-    ok(/15 CR/.test(await pagina.textContent('#supComisionDatos')) || /Tu comisión estimada/.test(await pagina.textContent('#supComisionDatos')), 'la supervisora ve a su agente y su comisión estimada');
+    await pagina.waitForFunction(() => /Tus jugadores propios/.test(document.getElementById('supComisionDatos').textContent), null, { timeout: 15000 });
+    const sup = await pagina.textContent('#supComisionDatos');
+    ok(/Por tu equipo \(5 %\)15 CR/.test(sup.replace(/\s+/g, ' ').replace(/ CR/g, ' CR').replace(/\) /g, ')')) || (/15 CR/.test(sup) && /50 CR/.test(sup)),
+      'la supervisora ve su 5 % de equipo (15) y lo que cobra como agente por su cliente propio (50)');
+    ok(/65 CR/.test(sup), 'su total estimado suma las dos cosas: 65 CR');
+    await pagina.locator('#supComisionCard').screenshot({ path: path.join(__dirname, 'captura-comision-supervisor.png') });
   } catch (e) {
     ok(false, 'excepción: ' + e.message.split('\n')[0]);
     await pagina.screenshot({ path: path.join(__dirname, 'fallo-referidos.png') });

@@ -43,6 +43,9 @@ set('solicitudesRetiro/R2', { userId: 'BG_a4', monto: 9999, estado: 'rechazado',
 set('solicitudesDeposito/S2', { userId: 'BG_a5', monto: 7000, moneda: 'CUP', estado: 'pendiente' });     // sin aprobar: no suma
 set('solicitudesDeposito/S3', { userId: 'BG_a8', monto: 5000, moneda: 'CUP', estado: 'aprobado', aprobadoEn: tp }); // jugador no activo: no suma
 set('solicitudesDeposito/S4', { userId: 'BG_b2', monto: 4000, moneda: 'CUP', estado: 'aprobado', aprobadoEn: tp }); // red de B en pérdida: no se paga
+// La supervisora también conserva un jugador propio: pierde 1.000 → la casa gana 1.000 → 5 % = 50 como agente.
+usuario('BG_s1', { nombre: 'Cliente de la supervisora', rol: 'member', rolLevel: 1, referidoPorUid: 'BG_S' });
+set('apuestas/BG_s1/p', { monto: 1000, cuota: 2, estado: 'perdida', pago: 0, fecha: tp, liquidadaEn: tp, tipoSaldo: 'real' });
 set('apuestas/BG_a3/pend', { monto: 500, cuota: 2, estado: 'pendiente', fecha: tp, tipoSaldo: 'real' }); // pendiente: no cuenta
 // Agente B: 2 jugadores que GANARON a la casa 1.000 la semana pasada; esta semana pierden 1.500.
 usuario('BG_b1', { nombre: 'Jugador b1', rol: 'member', rolLevel: 1, referidoPor: 'BGB0001' });
@@ -72,13 +75,18 @@ const entrar = async (uid) => (await llamar('POST', '/api/auth/login', { identif
     ok(A.comisionSupervisor === 292.5 && A.casa === 4897.5, 'supervisora 5 %: 292,5 CR · casa: 4.897,5 CR');
     ok(B.ganancia === -1000 && B.comisionAgente === 0 && B.arrastreSiguiente === -1000, 'red de B en pérdidas (−1.000): sin comisión y la pérdida pasa a la semana siguiente');
     ok(B.inyeccionNeta === 4000 && B.comisionInyeccion === 0, 'B inyectó 4.000 pero la casa perdió con su red: no cobra el 3 % (solo si la casa gana)');
-    ok(j.totales.casa === 4897.5 - 1000 && j.totales.comisionInyeccion === 75, 'totales para el CEO: casa ' + j.totales.casa + ' · inyección pagada ' + j.totales.comisionInyeccion);
+    const S = j.agentes.find(a => a.uid === 'BG_S');
+    ok(S && S.rol === 'director' && S.ganancia === 1000 && S.comisionAgente === 50 && S.comisionSupervisor === 0,
+      'la supervisora sigue cobrando como agente por su jugador propio: 5 % de 1.000 = 50 CR');
+    ok(!j.agentes.some(a => a.uid === 'BG_ceo'), 'quien no tiene jugadores propios no aparece como agente');
+    ok(j.totales.casa === 4897.5 - 1000 + 950 && j.totales.comisionInyeccion === 75, 'totales para el CEO: casa ' + j.totales.casa + ' · inyección pagada ' + j.totales.comisionInyeccion);
 
     // ---- Quién ve qué ----
     [s, j] = await llamar('GET', `/api/comisiones?semana=${pasada.id}`, null, t.BG_A);
     ok(s === 200 && j.agentes.length === 1 && j.agentes[0].uid === 'BG_A' && !j.totales, 'el agente solo ve lo suyo');
     [s, j] = await llamar('GET', `/api/comisiones?semana=${pasada.id}`, null, t.BG_S);
-    ok(s === 200 && j.agentes.map(a => a.uid).join() === 'BG_A' && j.supervisores[0].comision === 292.5, 'la supervisora ve solo a sus agentes y su comisión (292,5)');
+    ok(s === 200 && j.agentes.map(a => a.uid).sort().join() === 'BG_A,BG_S' && j.supervisores[0].comision === 292.5,
+      'la supervisora ve a sus agentes, su fila propia como agente y su 5 % de equipo (292,5)');
     [s] = await llamar('GET', '/api/comisiones', null, t.BG_a1);
     ok(s === 403, 'un jugador no ve comisiones');
 
