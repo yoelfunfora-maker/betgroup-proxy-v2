@@ -107,6 +107,13 @@ const PNG = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR
     const nuevo = Object.values(get('users') || {}).find(u => u.email === 'yoel@nauta.cu');
     ok(nuevo && get('codigosAcceso/INVITA-2026/usado') === true, 'cuenta creada con el correo en minúsculas y el código gastado');
 
+    // Bono de inscripción: 100 de promo, aviso de bienvenida y aviso en Canjes.
+    ok(nuevo.creditoPromo === 100 && /bono/.test(await pagina.textContent('#toast')), 'entra con 100 CR de bono promocional y se lo dice al darle la bienvenida → ' + (await pagina.textContent('#toast')).trim());
+    await pagina.evaluate(() => { if (typeof cerrarTutorial === 'function') cerrarTutorial(); goPanel('retiros'); });
+    await pagina.waitForSelector('#avisoBonoRetiro:not([hidden])', { timeout: 5000 });
+    ok(/deposita al menos 500 CUP/.test(await pagina.textContent('#avisoBonoRetiro')), 'en Canjes le explica que para retirar debe depositar 500 CUP');
+    await pagina.evaluate(() => goPanel('home'));
+
     // Fotos de MMA.
     await pagina.waitForSelector('img.bg-foto', { timeout: 20000 });
     const fotos = await pagina.$$eval('img.bg-foto', (els) => els.map(e => e.getAttribute('src')));

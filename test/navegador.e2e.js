@@ -73,7 +73,7 @@ http.createServer((req, res) => {
   try {
     await new Promise(r => setTimeout(r, 1500)); // precalentado de partidos en el servidor
     await pagina.goto(`http://127.0.0.1:${PUERTO_WEB}/index.html`);
-    await pagina.evaluate(() => { localStorage.setItem('betgroup_terms_accepted', 'true'); });
+    await pagina.evaluate(() => { localStorage.setItem('betgroup_terms_accepted', 'true'); ['jugador', 'agente', 'supervisor', 'ceo'].forEach(t => localStorage.setItem('bg_tutorial_' + t, '1')); }); // tutoriales ya vistos (se prueban en tutorial.e2e.js)
     await pagina.reload();
 
     // ---- Miembro entra con su TELÉFONO (pestaña por defecto) ----
@@ -119,7 +119,7 @@ http.createServer((req, res) => {
       return db.ref('apuestas/BG_m1').once('value').then(s => { const id = Object.keys(s.val())[0]; return db.ref('apuestas/BG_m1/' + id + '/estado').set('ganada'); }).then(() => 'escrito', (e) => e.message);
     });
     ok(ataque2 !== 'escrito', 'intento de marcar su apuesta como ganada: rechazado (' + ataque2 + ')');
-    const sol = await pagina.evaluate(() => db.ref('solicitudesDeposito/DEPWEB1').set({ id: 'DEPWEB1', userId: 'BG_m1', nombre: 'x', telefono: 'x', banco: 'B', titular: 'T', cuenta: '1', telBanco: '5', monto: 200, moneda: 'CUP', nota: '', fotoUrl: 'https://i.ibb.co/x.jpg', estado: 'pendiente', creadoEn: Date.now() }).then(() => 'ok', e => e.message));
+    const sol = await pagina.evaluate(() => db.ref('solicitudesDeposito/DEPWEB1').set({ id: 'DEPWEB1', userId: 'BG_m1', nombre: 'x', telefono: 'x', banco: 'B', titular: 'T', cuenta: '1', telBanco: '5', monto: 500, moneda: 'CUP', nota: '', fotoUrl: 'https://i.ibb.co/x.jpg', estado: 'pendiente', creadoEn: Date.now() }).then(() => 'ok', e => e.message));
     ok(sol === 'ok', 'el miembro crea una solicitud de depósito desde la web');
 
     await pagina.evaluate(() => doLogout());
@@ -138,7 +138,7 @@ http.createServer((req, res) => {
     await pagina.waitForSelector('text=Aprobar y acreditar', { timeout: 15000 });
     await pagina.click('#solicitudesList >> text=Aprobar y acreditar');
     await pagina.waitForFunction(() => document.getElementById('toast').textContent.includes('Depósito aprobado'), null, { timeout: 15000 });
-    ok(get('users/BG_m1/creditoReal') === 500 && get('solicitudesDeposito/DEPWEB1/estado') === 'aprobado', 'CEO aprueba el depósito desde su panel: saldo 300 → ' + get('users/BG_m1/creditoReal'));
+    ok(get('users/BG_m1/creditoReal') === 800 && get('solicitudesDeposito/DEPWEB1/estado') === 'aprobado', 'CEO aprueba el depósito (mínimo 500) desde su panel: saldo 300 → ' + get('users/BG_m1/creditoReal'));
 
     await pagina.evaluate(() => goPanel('ceo'));
     await pagina.waitForFunction(() => document.querySelectorAll('#adjUser option').length > 1, null, { timeout: 15000 });

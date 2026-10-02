@@ -77,7 +77,7 @@ http.createServer((req, res) => {
   try {
     await new Promise(r => setTimeout(r, 1500));
     await pagina.goto(`http://127.0.0.1:${PUERTO_WEB}/index.html`);
-    await pagina.evaluate(() => { localStorage.setItem('betgroup_terms_accepted', 'true'); });
+    await pagina.evaluate(() => { localStorage.setItem('betgroup_terms_accepted', 'true'); ['jugador', 'agente', 'supervisor', 'ceo'].forEach(t => localStorage.setItem('bg_tutorial_' + t, '1')); }); // tutoriales ya vistos (se prueban en tutorial.e2e.js)
     await pagina.reload();
 
     // ---- Registro con apodo ----

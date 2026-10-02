@@ -101,6 +101,10 @@ http.createServer((req, res) => {
     const usos = get('dispositivosUso') || {};
     ok(Object.values(usos).some(g => g && g.BG_m1) && !JSON.stringify(usos).includes(await pagina.evaluate(() => localStorage.getItem('bg_disp'))),
       'antifraude: el móvil envía su identificador al entrar y el servidor lo guarda cifrado');
+    // Primero sale el tutorial; la tarjeta de avisos espera a que se cierre.
+    await pagina.waitForSelector('#bgTut', { timeout: 8000 });
+    ok(!(await pagina.$('#bgInvitarAvisos')), 'mientras está el tutorial no se le pide nada más');
+    await pagina.click('#bgTut .bg-tut-saltar');
     await pagina.waitForSelector('#bgInvitarAvisos', { timeout: 15000 });
     await pagina.waitForTimeout(3500); // que se vaya el "Bienvenido" para la captura
     ok(true, 'tras entrar aparece "¿Te avisamos?" (explica para qué antes de pedir permiso)');
