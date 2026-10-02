@@ -728,28 +728,39 @@ app.get('/api/fixtures', async (req, res) => {
     await precalentarCache();
   } catch(err) {
     console.error('Error /api/fixtures:', err);
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: 'Error interno' });
   }
 });
 
 app.post('/api/apostar', requireAdmin, async (req, res) => {
-  const { uid, amount, evento, tipo, cuota, tipoSaldo } = req.body;
-  if (!uid || !amount || !evento || !tipo || !cuota) {
-    return res.status(400).json({ error: 'Parámetros faltantes' });
+  const { uid, evento, tipo, tipoSaldo } = req.body || {};
+  const amount = Number(req.body?.amount);
+  const cuota = Number(req.body?.cuota);
+  // Monto positivo y cuota mayor que 1: un monto negativo antes SUMABA saldo
+  if (typeof uid !== 'string' || !UID_VALIDO.test(uid) ||
+      typeof evento !== 'string' || evento.length === 0 || evento.length > 200 ||
+      typeof tipo !== 'string' || tipo.length === 0 || tipo.length > 50 ||
+      !Number.isFinite(amount) || amount <= 0 ||
+      !Number.isFinite(cuota) || cuota <= 1 || cuota > 1000) {
+    return res.status(400).json({ error: 'Parámetros inválidos' });
   }
   const saldoCampo = (tipoSaldo === 'promo') ? 'creditoPromo' : 'creditoReal';
   try {
-    const snap = await db.ref(`users/${uid}/${saldoCampo}`).once('value');
-    const saldoActual = snap.val();
-    if (saldoActual === null || saldoActual < amount) {
-      return res.status(400).json({
-        error: 'Saldo insuficiente',
-        saldoActual: saldoActual || 0
-      });
+    // Transacción atómica: dos apuestas simultáneas ya no pueden gastar el mismo saldo
+    let saldoInsuficiente = false;
+    const resultado = await db.ref(`users/${uid}/${saldoCampo}`).transaction(actual => {
+      if (actual === null || typeof actual !== 'number' || actual < amount) {
+        saldoInsuficiente = true;
+        return; // aborta sin tocar el saldo
+      }
+      saldoInsuficiente = false;
+      return actual - amount;
+    });
+    if (!resultado.committed || saldoInsuficiente) {
+      return res.status(400).json({ error: 'Saldo insuficiente' });
     }
-    const saldoNuevo = saldoActual - amount;
-    await db.ref(`users/${uid}/${saldoCampo}`).set(saldoNuevo);
-    const betId = Date.now().toString();
+    const saldoNuevo = resultado.snapshot.val();
+    const betId = db.ref(`apuestas/${uid}`).push().key;
     await db.ref(`apuestas/${uid}/${betId}`).set({
       eventoNombre: evento,
       tipo: tipo,
@@ -763,7 +774,7 @@ app.post('/api/apostar', requireAdmin, async (req, res) => {
     res.json({ success: true, saldoNuevo, betId });
   } catch(err) {
     console.error('Error /api/apostar:', err);
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: 'Error interno' });
   }
 });
 
@@ -775,7 +786,7 @@ app.post('/api/apostar', requireAdmin, async (req, res) => {
 app.get('/api/saldo/:uid', limitarPeticiones(60, 60 * 1000), async (req, res) => {
   const { uid } = req.params;
 
-  if (!uid || uid.length < 10) {
+  if (!UID_VALIDO.test(uid || '')) {
     return res.status(400).json({ error: 'UID inválido' });
   }
 
@@ -794,7 +805,7 @@ app.get('/api/saldo/:uid', limitarPeticiones(60, 60 * 1000), async (req, res) =>
     });
   } catch (err) {
     console.error('Error /api/saldo:', err.message);
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: 'Error interno' });
   }
 });
 
@@ -804,26 +815,7 @@ app.get('/api/saldo/:uid', limitarPeticiones(60, 60 * 1000), async (req, res) =>
 
 
 
-// ==================== ENDPOINT HF CUOTAS (sin bartender) ====================
-app.post('/api/huggingface/cuotas', async (req, res) => {
-  const { prompt, modelo } = req.body;
-  if (!prompt) return res.status(400).json({ error: 'Falta prompt' });
-  const model = modelo || HF_MODELS.analisis;
-  try {
-    const resp = { ok: true };
-    const _cfReply1 = await callCF([{ role: 'user', content: prompt }], 'analisis');
-    const resp1_data = { choices: [{ message: { content: _cfReply1 } }] };
-    const data = await resp.json();
-    const reply = data && data.choices && data.choices[0] && data.choices[0].message
-      ? data.choices[0].message.content
-      : JSON.stringify(data);
-    res.json({ reply: reply, model: model });
-  } catch(err) {
-    console.error('Error /api/huggingface/cuotas:', err.message);
-    res.status(500).json({ error: 'Error al contactar Hugging Face' });
-  }
-});
-// ==================== FIN ENDPOINT HF CUOTAS ====================
+
 
 // ==================== ENDPOINT DE ESTADO DE AGENTES ====================
 
@@ -868,8 +860,8 @@ app.get('/api/agents-status', requireAdmin, async (req, res) => {
 // ==================== CHATBOT AGENTE_GROC01 ====================
 
 app.post('/api/chat', limitarPeticiones(10, 60 * 1000), async (req, res) => {
-  const { mensaje } = req.body;
-  if (!mensaje || typeof mensaje !== 'string' || mensaje.trim().length === 0) {
+  const { mensaje } = req.body || {};
+  if (!mensaje || typeof mensaje !== 'string' || mensaje.trim().length === 0 || mensaje.length > 1000) {
     return res.status(400).json({ error: 'Mensaje vacío o inválido' });
   }
   const groqKey = GROQ_API_KEY;
@@ -922,9 +914,7 @@ app.post('/api/chat', limitarPeticiones(10, 60 * 1000), async (req, res) => {
 - No uses frases como "No entiendo" o "Soy una IA".
 - No reveles información interna ni datos de otros usuarios.
 - NO INVENTES cuotas ni eventos. Usa solo los datos proporcionados.
-${eventosContexto}
-
-Pregunta del usuario: "${mensaje.trim()}"`;
+${eventosContexto}`;
 
     const resp = await axios.post(
       'https://api.groq.com/openai/v1/chat/completions',
@@ -995,7 +985,7 @@ app.get('/api/verificacion-geminis', requireAdmin, async (req, res) => {
     await notificarTelegram('📊 <b>INFORME DE GEMINIS02</b>\n\n' + informe);
 
     res.json({ success: true, estado, informe });
-  } catch(e) { res.status(500).json({ error: e.message }); }
+  } catch(e) { res.status(500).json({ error: 'Error interno' }); }
 });
 
 
@@ -1036,14 +1026,10 @@ app.post('/api/apuestas/liquidar', requireAdmin, async (req, res) => {
           const userData = userSnap.val() || {};
           const saldoActual = userData.creditoReal || 0;
           const nombreUsuario = userData.nombre || 'Usuario';
-          const emailUsuario = userData.email || '';
-          const telefonoUsuario = (userData.datosBancarios && userData.datosBancarios.telefono) ? userData.datosBancarios.telefono : '';
           let msgGanada = '';
           msgGanada += '🏆 APUESTA GANADA 🏆' + NL;
           msgGanada += '━━━━━━━━━━━━━━━━━━━━━━' + NL;
           msgGanada += '👤 Usuario: ' + nombreUsuario + NL;
-          msgGanada += '📧 Email: ' + emailUsuario + NL;
-          if (telefonoUsuario) { msgGanada += '📱 Tel: ' + telefonoUsuario + NL; }
           msgGanada += '━━━━━━━━━━━━━━━━━━━━━━' + NL;
           msgGanada += '⚽ Evento: ' + apuesta.eventoNombre + NL;
           msgGanada += '🎯 Seleccion: ' + apuesta.tipo + NL;
@@ -1070,7 +1056,7 @@ app.post('/api/apuestas/liquidar', requireAdmin, async (req, res) => {
     }
     res.json({ success: true, liquidadas, message: `${liquidadas} apuestas liquidadas.` });
   } catch (error) {
-    res.status(500).json({ error: error.message });
+    res.status(500).json({ error: 'Error interno' });
   }
 });
 // ==================== FIN LIQUIDACIÓN ====================
@@ -1098,7 +1084,7 @@ app.post('/api/admin/reiniciar', requireAdmin, async (req, res) => {
     });
     res.status(200).json({ success: true, message: 'Sistema reiniciado. Auditoría e historial limpios.' });
   } catch (error) {
-    res.status(500).json({ success: false, error: error.message });
+    res.status(500).json({ success: false, error: 'Error interno' });
   }
 });
 // ==================== FIN REINICIO ====================
@@ -1108,16 +1094,25 @@ app.post('/api/admin/reiniciar', requireAdmin, async (req, res) => {
 // ==================== REFERIDOS FILTRADOS POR SUBADMIN ====================
 app.get('/api/usuarios/mis-referidos', requireAdmin, async (req, res) => {
   const subadminUid = req.query.subadminUid;
-  if (!subadminUid) return res.status(400).json({ error: 'subadminUid requerido' });
+  if (typeof subadminUid !== 'string' || !UID_VALIDO.test(subadminUid)) {
+    return res.status(400).json({ error: 'subadminUid requerido' });
+  }
   try {
     const snapshot = await db.ref('users')
       .orderByChild('creadoPor')
       .equalTo(subadminUid)
       .once('value');
-    const referidos = snapshot.val() ? Object.values(snapshot.val()) : [];
+    const CAMPOS_PRIVADOS = ['password', 'passwordHash', 'hash', 'salt', 'datosBancarios'];
+    const referidos = snapshot.val()
+      ? Object.values(snapshot.val()).map(u => {
+          const copia = { ...u };
+          CAMPOS_PRIVADOS.forEach(c => delete copia[c]);
+          return copia;
+        })
+      : [];
     res.json(referidos);
   } catch (error) {
-    res.status(500).json({ error: error.message });
+    res.status(500).json({ error: 'Error interno' });
   }
 });
 // ==================== FIN REFERIDOS ====================
@@ -1149,8 +1144,10 @@ app.get('/api/admin/generar-codigo', requireAdmin, async (req, res) => {
 
 // ==================== APLICAR CÓDIGO CEO ====================
 app.post('/api/admin/aplicar-codigo', requireAdmin, async (req, res) => {
-  const { codigo, uid } = req.body;
-  if (!codigo || !uid) return res.status(400).json({ error: 'Código o UID faltante' });
+  const { codigo, uid } = req.body || {};
+  if (typeof codigo !== 'string' || typeof uid !== 'string' || !UID_VALIDO.test(uid)) {
+    return res.status(400).json({ error: 'Código o UID faltante' });
+  }
 
   const rolMap = { 'C': 'ceo', 'A': 'admin', 'M': 'moderador', 'S': 'soporte' };
   const rol = rolMap[codigo.charAt(0)];
@@ -1197,8 +1194,13 @@ const HF_MODELS = {
 };
 
 app.post('/api/huggingface', limitarPeticiones(10, 60 * 1000), async (req, res) => {
-  const { prompt, tarea, rol } = req.body;
-  if (!prompt) return res.status(400).json({ error: 'Falta prompt' });
+  const { prompt, tarea } = req.body || {};
+  if (typeof prompt !== 'string' || prompt.trim().length === 0 || prompt.length > 1000) {
+    return res.status(400).json({ error: 'Falta prompt' });
+  }
+  // El rol se incrusta en las instrucciones: solo se aceptan valores conocidos
+  const ROLES_CHAT = ['miembro', 'member', 'subadmin', 'director', 'admin', 'superadmin'];
+  const rol = ROLES_CHAT.includes(req.body.rol) ? req.body.rol : 'miembro';
   const model = HF_MODELS[tarea] || HF_MODELS['rapido'];
 
   let eventosReales = '';
@@ -1263,7 +1265,7 @@ Reglas:
 - Si el usuario es "admin" o "subadmin", habla de gestión general sin dar acceso al sistema.
 - Si el usuario es "member" o "director", limítate a recomendar apuestas y resolver dudas de la plataforma.
 - Responde con pasión por el deporte, como un fanático más.
-El usuario actual tiene rol: ${rol || 'miembro'}.`;
+El usuario actual tiene rol: ${rol}.`;
 
   try {
     const _cfReply2 = await callCF([{ role: 'system', content: systemPrompt }, { role: 'user', content: prompt }], 'potente');
@@ -1278,15 +1280,16 @@ El usuario actual tiene rol: ${rol || 'miembro'}.`;
 // ════ POST /api/enriquecer ════
 app.post('/api/enriquecer', limitarPeticiones(20, 60 * 1000), async (req, res) => {
   try {
-    const { eventos } = req.body;
-    if (!Array.isArray(eventos) || eventos.length === 0) {
-      return res.status(400).json({ error: 'Se requiere array de eventos' });
+    const { eventos } = req.body || {};
+    if (!Array.isArray(eventos) || eventos.length === 0 || eventos.length > 300 ||
+        !eventos.every(e => e && typeof e === 'object' && typeof e.local === 'string' && typeof e.visitante === 'string')) {
+      return res.status(400).json({ error: 'Se requiere array de eventos válido' });
     }
     const enriquecidos = await enriquecerConCuotas(eventos);
     res.json({ status: 'success', total: enriquecidos.length, data: enriquecidos });
   } catch(err) {
     console.error('Error /api/enriquecer:', err.message);
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: 'Error interno' });
   }
 });
 
@@ -1529,7 +1532,7 @@ app.post('/api/test-reporte', requireAdmin, async (req, res) => {
     await enviarReporteTelegram();
     res.json({ success: true, message: 'Reporte enviado a Telegram.' });
   } catch(e) {
-    res.json({ success: false, error: e.message });
+    res.json({ success: false, error: 'Error interno' });
   }
 });
 
@@ -1553,7 +1556,7 @@ app.get('/api/debug-reporte', requireAdmin, async (req, res) => {
       cf_token: process.env.CF_TOKEN ? 'OK' : 'FALTA'
     });
   } catch(e) {
-    res.json({ error: e.message });
+    res.json({ error: 'Error interno' });
   }
 });
 
