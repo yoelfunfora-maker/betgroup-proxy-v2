@@ -181,7 +181,7 @@ Decisiones de Yoel: ranking por TOTAL APOSTADO (saldo real) entre quienes deposi
 - Pruebas: `test/ranking.prueba.js` (27) y `test/etapa8.e2e.js` (11 en navegador).
 - Riesgo pendiente: los comprobantes en ImgBB son públicos para quien tenga el enlace.
 
-### Después de la Etapa 8 (2 oct 2026)
+### Después de la Etapa 8 (2 oct 2026; web publicada 15:42, copia en publico.bak_20261002_154219)
 - Botón "+ mercados": `.bg-cuotas[hidden]{display:none!important}` (display:grid anulaba hidden).
 - Alias de clubes ESPN↔The Odds API (Inter, Sporting CP, Lyon, Rennes, Brest, Atlético-MG, Athletico-PR, København, Legia) y letras ø/æ/ł/ß/đ.
 - Diagnóstico: `diagnostico_cuotas.sh sincuota` lista todos los partidos sin cuota con un `motivo` en palabras.
