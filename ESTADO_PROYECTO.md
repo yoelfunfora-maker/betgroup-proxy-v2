@@ -39,7 +39,7 @@ Node.js/Express en Render + Firebase Realtime Database (la base de datos sí es 
 - `deleteUser` todavía llama a `localhost:3000` en vez de ir directo a RTDB
 - 3 claves de Odds API rotan según hora del día (renovadas 1 jul) — Yoel mencionó que debería existir una cuarta clave
 
-## Etapa 1 de seguridad — 2 oct 2026 (rama `claude/upbeat-cerf-rpytdm`, SIN desplegar)
+## Etapa 1 de seguridad — 2 oct 2026 (desplegada junto con la Etapa 3)
 
 Autorizada por Yoel. Cambios en commits separados:
 
@@ -74,7 +74,7 @@ Autorizada por Yoel. Cambios en commits separados:
 | Subadmin+ | `/api/usuarios/mis-referidos` |
 | Solo CEO | `/api/admin/*`, `/api/apuestas/liquidar`, `/api/test-reporte`, `/api/debug-reporte`, `/api/estado-sistema`, `/api/agents-status`, `/api/verificacion-geminis`, `/api/huggingface/cuotas` |
 
-## Etapa 2 de dinero — 2 oct 2026 (misma rama, SIN desplegar)
+## Etapa 2 de dinero — 2 oct 2026 (desplegada junto con la Etapa 3)
 
 `lib/apuestas.js` es el único sitio que coloca y liquida apuestas:
 
@@ -108,7 +108,9 @@ Contrato nuevo de `/api/apostar`: `{eventoId, tipo: Local|Visitante|Empate, amou
 - **Reglas de RTDB (`database.rules.json`) con `.read: true` y `.write: true` en todos los nodos** → siguiente trabajo (Etapa 3).
 - ⚠️ Nunca publicar ni subir la carpeta `betgroup-hosting` entera. Nunca `git push --force` desde ella: su `main` local (d65b0e1) no coincide con GitHub.
 
-## Etapa 3 — reglas cerradas, todo por el servidor (2 oct 2026, SIN desplegar)
+## Etapa 3 — reglas cerradas, todo por el servidor (DESPLEGADA 2 oct 2026, 04:19 hora de Cuba)
+
+Publicada por Yoel con `publicar_todo.sh`: variables en Render (200), servidor en `main` y arrancado, web nueva en Hosting (copia en `publico.bak_20261002_041831`), reglas cerradas. Verificado: `users.json` público → Permission denied; `bg-api.js` en línea; `/api/fixtures` con 32 partidos.
 
 **Arquitectura nueva:** Firebase Auth está bloqueado en Cuba, así que las reglas de RTDB no pueden distinguir usuarios. Por eso las reglas quedan `".read": false, ".write": false` y TODO pasa por el servidor:
 
