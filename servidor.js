@@ -1,6 +1,8 @@
 const express = require('express');
 const https = require('https');
-const admin = require('firebase-admin');
+// firebase-admin 12+ usa la API modular.
+const { initializeApp, cert } = require('firebase-admin/app');
+const { getDatabase } = require('firebase-admin/database');
 const axios = require('axios');
 const config = require('./lib/config');
 const {
@@ -53,13 +55,13 @@ try {
   const serviceAccountJson = Buffer.from(config.firebase.serviceAccountB64, 'base64').toString('utf8');
   const serviceAccount = JSON.parse(serviceAccountJson);
 
-  admin.initializeApp({
-    credential: admin.credential.cert(serviceAccount),
+  initializeApp({
+    credential: cert(serviceAccount),
     databaseURL: config.firebase.databaseURL
   });
 
   console.log('✅ Firebase Admin SDK inicializado');
-  db = admin.database();
+  db = getDatabase();
 } catch(error) {
   console.error('Error al inicializar Firebase Admin SDK:', error.message);
   process.exit(1);
