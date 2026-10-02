@@ -99,6 +99,11 @@ Contrato nuevo de `/api/apostar`: `{eventoId, tipo: Local|Visitante|Empate, amou
 - `uuid` (moderada, dependencia interna de firebase-admin) sin arreglo publicado aún.
 - `server.js` y `servidor.js.bak_*` siguen en el repo (sin autorización para borrarlos).
 
+## Decisiones de Yoel (2 oct 2026)
+
+- **Las claves filtradas NO se rotan** (decisión de Yoel, riesgo aceptado). Se cargan tal cual en las variables de entorno de Render. Siguen visibles en el historial público de git.
+- **Saldo promocional:** solo existe como saldo recargable, sin reglas escritas. Mientras no se definan, se aplica lo que hace el código: se apuesta con promo, los premios vuelven a promo y nunca pasa a saldo real.
+
 ## Reglas fijas
 
 - Repo hermano `betgroup-proxy` (sin "-v2") tiene credenciales reales embebidas en archivos versionados — Yoel ya lo sabe, piensa eliminarlo, no requiere acción inmediata
