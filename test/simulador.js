@@ -92,7 +92,7 @@ function ref(p = '') {
   return r;
 }
 
-function arrancar({ puerto, env = {}, axiosGet } = {}) {
+function arrancar({ puerto, env = {}, axiosGet, espn } = {}) {
   const original = Module._load;
   const axiosReal = require('axios');
   const axiosFalso = Object.assign(Object.create(axiosReal), {
@@ -107,7 +107,11 @@ function arrancar({ puerto, env = {}, axiosGet } = {}) {
     request: (opt, cb) => {
       const req = new EventEmitter();
       req.setTimeout = () => {}; req.destroy = () => {};
-      req.end = () => { const res = new EventEmitter(); cb(res); setImmediate(() => { res.emit('data', '{"events":[]}'); res.emit('end'); }); };
+      req.end = () => {
+        const res = new EventEmitter(); cb(res);
+        const cuerpo = (espn && espn(opt.path)) || '{"events":[]}';
+        setImmediate(() => { res.emit('data', cuerpo); res.emit('end'); });
+      };
       return req;
     }
   };

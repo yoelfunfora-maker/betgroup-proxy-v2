@@ -108,6 +108,24 @@ Contrato nuevo de `/api/apostar`: `{eventoId, tipo: Local|Visitante|Empate, amou
 - **Reglas de RTDB (`database.rules.json`) con `.read: true` y `.write: true` en todos los nodos** → siguiente trabajo (Etapa 3).
 - ⚠️ Nunca publicar ni subir la carpeta `betgroup-hosting` entera. Nunca `git push --force` desde ella: su `main` local (d65b0e1) no coincide con GitHub.
 
+## Etapa 3 — reglas cerradas, todo por el servidor (2 oct 2026, SIN desplegar)
+
+**Arquitectura nueva:** Firebase Auth está bloqueado en Cuba, así que las reglas de RTDB no pueden distinguir usuarios. Por eso las reglas quedan `".read": false, ".write": false` y TODO pasa por el servidor:
+
+- Frontend (repo privado `betgroup-frontend`, rama `claude/upbeat-cerf-rpytdm`): `bg-api.js` sustituye al SDK de Firebase con un objeto compatible que envía cada operación a `POST /api/db`. Casi todo `index.html` sigue igual.
+- `lib/politicas.js` decide por rol y por fila: miembro (lo suyo + nombre y datos bancarios de su subadmin), subadmin (su equipo: por `referidoPorUid`, por su `codigoInvitacion` o por códigos que generó), director (depósitos), CEO (todo). Saldo, rol y credenciales no se escriben nunca por `/api/db`.
+- `lib/operaciones.js`: `/api/depositos/:id/aprobar|rechazar`, `/api/solicitudes-deposito/:id/aprobar|rechazar` (director+), `/api/admin/ajustar-saldo|asignar-rol|restablecer-clave` (CEO), `/api/auth/registro`, `/api/auth/recuperar`, `/api/notificar`.
+- Login con email o teléfono; usuarios antiguos de Firebase Auth se migran en su primer acceso (`FIREBASE_WEB_API_KEY`).
+- `/api/fixtures` es la única fuente de partidos/cuotas (incluye cuotas del bot de `mercados/` y boxeo).
+- Pruebas: `npm test` (49 + 52 de permisos) y `test/navegador.e2e.js` (Playwright, 13 comprobaciones en Chromium real).
+
+### Orden de publicación (scripts en `betgroup-frontend/publicar/`)
+1. `1_configurar_render.sh` — variables de entorno en Render (las claves mantenidas se extraen del código antiguo público).
+2. Fusionar la rama de este repo en `main` → Render despliega el servidor.
+3. `2_publicar_web.sh` — web nueva (con copia de seguridad de `publico`).
+4. `3_cerrar_reglas.sh` — reglas cerradas (con copia de las antiguas).
+- Emergencia: `revertir.sh`.
+
 ## Decisiones de Yoel (2 oct 2026)
 
 - **Las claves filtradas NO se rotan** (decisión de Yoel, riesgo aceptado). Se cargan tal cual en las variables de entorno de Render. Siguen visibles en el historial público de git.
