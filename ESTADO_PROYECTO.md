@@ -245,7 +245,8 @@ Revisión previa: el "Entrar con Google" antiguo nunca funcionó en la versión 
 - `POST /api/auth/google`: cuenta vinculada → entra; correo @gmail.com con cuenta → se vincula; persona nueva → pide apodo, teléfono y CÓDIGO DE INVITACIÓN (mismo registro, bono y reglas). Vínculos en `googleCuentas/<sub>` (ilegible desde la web); `googleSub` es campo protegido.
 - Registro normal: casilla Turnstile. Si Cloudflare dice robot → rechazo; si la casilla no carga (Cuba) → pasa con su código y queda `registro_sin_turnstile` en la auditoría; `config/turnstileObligatorio = true` la hace obligatoria.
 - `GET /api/auth/opciones` dice a la web qué mostrar. Todo APAGADO hasta definir en Render: `GOOGLE_CLIENT_ID`, `TURNSTILE_SITE_KEY`, `TURNSTILE_SECRET`.
-- Pruebas: `test/google.prueba.js` (22), `test/google.e2e.js` (10, incluye Google/Cloudflare bloqueados).
+- **Vincular Google es OBLIGATORIO** (decisión de Yoel): quien entró sin Google puede usar la app mientras Google no responda; la web vigila la conexión (evento online + reintento cada 3 min, máx. 10) y en cuanto Google carga muestra una pantalla completa sin "Ahora no" (solo vincular o cerrar sesión). `POST /api/auth/google/vincular` (con sesión; reserva atómica de `googleCuentas/<sub>`; no permite tomar el Google de otro ni cambiarlo). Google exige un toque de confirmación: no puede hacerse en silencio. La obligación es de la web (el servidor no puede saber si Google carga en ese móvil).
+- Pruebas: `test/google.prueba.js` (30), `test/google.e2e.js` (17, incluye Google/Cloudflare bloqueados y la vinculación obligatoria al volver la conexión).
 - Pendiente: Yoel crea las claves; luego desplegar el servidor (push a main). Las funciones antiguas `doGoogleSignIn`/`showGoogleRegForm`/`completarGoogleReg` siguen en index.html sin uso (no se borran sin autorización).
 
 ## Cierre de la sesión del 2 oct 2026 — pendiente para la próxima
