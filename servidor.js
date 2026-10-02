@@ -12,6 +12,7 @@ const {
 const { crearAuditoria } = require('./lib/auditoria');
 const { crearAutenticacion, NIVEL } = require('./lib/autenticacion');
 const validar = require('./lib/validacion');
+const { crearMotorApuestas, ErrorApuesta } = require('./lib/apuestas');
 const crypto = require('crypto');
 
 const app = express();
@@ -72,6 +73,11 @@ const auditoria = crearAuditoria(db, config.auditoriaSecreto);
 // Sesiones firmadas por el servidor (ver lib/autenticacion.js).
 const auth = crearAutenticacion({ db, config, auditoria });
 const { requerirSesion, requerirNivel } = auth;
+// Único sitio que coloca y liquida apuestas (ver lib/apuestas.js).
+const motor = crearMotorApuestas({
+  db, auditoria,
+  obtenerEventos: () => { const f = getCache('fixtures'); return f && Array.isArray(f.data) ? f.data : null; }
+});
 
 // ==================== CACHÉ ====================
 
@@ -689,41 +695,25 @@ app.get('/api/fixtures', async (req, res) => {
 });
 
 app.post('/api/apostar', requerirSesion, limiteApuestas, async (req, res) => {
-  // El usuario sale de la sesión, nunca del cuerpo de la petición.
-  const uid = req.usuario.uid;
-  const { tipoSaldo } = req.body || {};
-  const amount = validar.monto(req.body?.amount);
+  // El usuario sale de la sesión; la cuota, del servidor.
+  const monto = validar.monto(req.body?.amount);
   const evento = validar.texto(req.body?.evento, 200);
+  const eventoId = validar.texto(req.body?.eventoId == null ? '' : String(req.body.eventoId), 64);
   const tipo = validar.tipoApuesta(req.body?.tipo);
-  const cuota = Number(req.body?.cuota);
-  if (amount === null || !evento || !tipo || !Number.isFinite(cuota) || cuota <= 1 || cuota > 1000) {
+  const tipoSaldo = req.body?.tipoSaldo === 'promo' ? 'promo' : 'real';
+  const cuotaCliente = req.body?.cuota;
+  if (monto === null || (!evento && !eventoId) || !tipo
+    || (cuotaCliente !== undefined && !Number.isFinite(Number(cuotaCliente)))) {
     return res.status(400).json({ error: 'Parámetros inválidos' });
   }
-  const saldoCampo = (tipoSaldo === 'promo') ? 'creditoPromo' : 'creditoReal';
   try {
-    const snap = await db.ref(`users/${uid}/${saldoCampo}`).once('value');
-    const saldoActual = snap.val();
-    if (saldoActual === null || saldoActual < amount) {
-      return res.status(400).json({
-        error: 'Saldo insuficiente',
-        saldoActual: saldoActual || 0
-      });
-    }
-    const saldoNuevo = saldoActual - amount;
-    await db.ref(`users/${uid}/${saldoCampo}`).set(saldoNuevo);
-    const betId = Date.now().toString();
-    await db.ref(`apuestas/${uid}/${betId}`).set({
-      eventoNombre: evento,
-      tipo: tipo,
-      monto: amount,
-      cuota: cuota,
-      ganancia: Math.floor(amount * cuota),
-      estado: 'pendiente',
-      fecha: Date.now(),
-      tipoSaldo: tipoSaldo || 'real'
+    const r = await motor.colocarApuesta({
+      uid: req.usuario.uid, usuario: req.usuario.datos, eventoId, evento, tipo, monto,
+      cuotaCliente: cuotaCliente === undefined ? undefined : Number(cuotaCliente), tipoSaldo, requestId: req.id
     });
-    res.json({ success: true, saldoNuevo, betId });
+    res.json({ success: true, ...r });
   } catch(err) {
+    if (err instanceof ErrorApuesta) return res.status(err.estado).json({ error: err.message, ...err.extra });
     responderError(res, req, err, '/api/apostar');
   }
 });
@@ -974,73 +964,65 @@ app.get('/api/verificacion-geminis', soloCEO, async (req, res) => {
 
 
 // ==================== LIQUIDACIÓN DE APUESTAS (TRANSACCIONAL) ====================
+// Aviso al grupo: solo nombre de pila, nunca email, teléfono ni saldo.
+async function avisarApuestaGanada(uid, ap) {
+  const NL = String.fromCharCode(10);
+  const nombreSnap = await db.ref('users/' + uid + '/nombre').once('value');
+  const nombre = escaparHtml(String(nombreSnap.val() || 'Usuario').split(' ')[0]);
+  let msg = '🏆 APUESTA GANADA 🏆' + NL;
+  msg += '━━━━━━━━━━━━━━━━━━━━━━' + NL;
+  msg += '👤 Usuario: ' + nombre + NL;
+  msg += '⚽ Evento: ' + escaparHtml(ap.eventoNombre) + NL;
+  msg += '🎯 Seleccion: ' + escaparHtml(ap.tipo) + NL;
+  msg += '📊 Cuota: x' + Number(ap.cuota).toFixed(2) + NL;
+  msg += '💵 Monto apostado: $' + Number(ap.monto).toFixed(2) + NL;
+  msg += '💰 Ganancia: $' + Number(ap.pago).toFixed(2) + NL;
+  msg += '━━━━━━━━━━━━━━━━━━━━━━' + NL;
+  msg += '🎉 Felicitaciones ' + nombre + '! Sigue en BetGroup Pro!';
+  await notificarTelegram(msg);
+}
+
+// Liquida todas las apuestas pendientes de un evento (por id o por nombre).
+async function liquidarEvento({ eventoId, nombre, resultado, origen, requestId }) {
+  const todas = (await db.ref('apuestas').once('value')).val() || {};
+  const nombreNorm = String(nombre || '').toLowerCase().trim();
+  const resumen = { liquidadas: 0, ganadas: 0, perdidas: 0, anuladas: 0 };
+  for (const uid of Object.keys(todas)) {
+    for (const betId of Object.keys(todas[uid] || {})) {
+      const ap = todas[uid][betId];
+      if (!ap || ap.estado !== 'pendiente') continue;
+      const coincide = (eventoId && ap.eventoId && String(ap.eventoId) === String(eventoId))
+        || (nombreNorm && String(ap.eventoNombre || '').toLowerCase().trim() === nombreNorm);
+      if (!coincide) continue;
+      const r = await motor.liquidarApuesta({ uid, betId, resultado, origen, requestId });
+      if (!r) continue; // otra liquidación llegó antes: no se paga dos veces
+      resumen.liquidadas++;
+      if (r.estado === 'ganada') { resumen.ganadas++; await avisarApuestaGanada(uid, r); }
+      else if (r.estado === 'perdida') resumen.perdidas++;
+      else resumen.anuladas++;
+    }
+  }
+  return resumen;
+}
+
 app.post('/api/apuestas/liquidar', soloCEO, async (req, res) => {
+  // partidoId puede ser el id del evento o el nombre "Local vs Visitante".
   const partidoId = validar.texto(req.body?.partidoId, 200);
-  const resultadoGanador = validar.tipoApuesta(req.body?.resultadoGanador);
+  const r = req.body?.resultadoGanador;
+  const resultadoGanador = r === 'ANULADA' ? 'ANULADA' : validar.tipoApuesta(r);
   if (!partidoId || !resultadoGanador) {
-    return res.status(400).json({ error: 'partidoId y resultadoGanador (Local, Visitante o Empate) requeridos' });
+    return res.status(400).json({ error: 'partidoId y resultadoGanador (Local, Visitante, Empate o ANULADA) requeridos' });
   }
   await auditoria.registrarSeguro({
     accion: 'liquidacion_manual', actor: req.usuario.uid, objetivo: partidoId,
     requestId: req.id, detalles: { resultadoGanador }
   });
   try {
-    const snapshot = await db.ref('apuestas').once('value');
-    if (!snapshot.exists()) {
-      return res.status(200).json({ message: 'No hay apuestas para liquidar.' });
-    }
-    const todosUsuarios = snapshot.val();
-    let liquidadas = 0;
-
-    for (const uid of Object.keys(todosUsuarios)) {
-      const apuestasUsuario = todosUsuarios[uid];
-      for (const betId of Object.keys(apuestasUsuario)) {
-        const apuesta = apuestasUsuario[betId];
-        if (apuesta.estado !== 'pendiente') continue;
-        if (apuesta.eventoNombre !== partidoId) continue;
-
-        const gano = (apuesta.tipo === resultadoGanador);
-        const nuevoEstado = gano ? 'ganada' : 'perdida';
-
-        await db.ref(`apuestas/${uid}/${betId}`).update({ estado: nuevoEstado });
-
-        if (gano) {
-          const premio = parseFloat(apuesta.monto) * parseFloat(apuesta.cuota);
-          const userRef = db.ref(`users/${uid}/creditoReal`);
-          await userRef.transaction(current => (current || 0) + premio);
-          const NL = String.fromCharCode(10);
-          const montoApostado = parseFloat(apuesta.monto);
-          // Al grupo de Telegram solo va el nombre de pila: nunca email, teléfono ni saldo.
-          const userSnap = await db.ref('users/' + uid + '/nombre').once('value');
-          const nombreUsuario = escaparHtml(String(userSnap.val() || 'Usuario').split(' ')[0]);
-          let msgGanada = '';
-          msgGanada += '🏆 APUESTA GANADA 🏆' + NL;
-          msgGanada += '━━━━━━━━━━━━━━━━━━━━━━' + NL;
-          msgGanada += '👤 Usuario: ' + nombreUsuario + NL;
-          msgGanada += '━━━━━━━━━━━━━━━━━━━━━━' + NL;
-          msgGanada += '⚽ Evento: ' + escaparHtml(apuesta.eventoNombre) + NL;
-          msgGanada += '🎯 Seleccion: ' + apuesta.tipo + NL;
-          msgGanada += '📊 Cuota: x' + parseFloat(apuesta.cuota).toFixed(2) + NL;
-          msgGanada += '━━━━━━━━━━━━━━━━━━━━━━' + NL;
-          msgGanada += '💵 Monto apostado: $' + montoApostado.toFixed(2) + NL;
-          msgGanada += '💰 Ganancia: $' + premio.toFixed(2) + NL;
-          msgGanada += '━━━━━━━━━━━━━━━━━━━━━━' + NL;
-          msgGanada += '🎉 Felicitaciones ' + nombreUsuario + '! La suerte estuvo de tu lado!' + NL;
-          msgGanada += '🔥 Sigue apostando en BetGroup Pro!';
-          await notificarTelegram(msgGanada);
-
-          await db.ref('auditLog').push().set({
-            tipo: 'pago_premio',
-            uid,
-            betId,
-            montoPagado: premio,
-            fecha: Date.now()
-          });
-        }
-        liquidadas++;
-      }
-    }
-    res.json({ success: true, liquidadas, message: `${liquidadas} apuestas liquidadas.` });
+    const resumen = await liquidarEvento({
+      eventoId: partidoId, nombre: partidoId, resultado: resultadoGanador,
+      origen: `manual:${req.usuario.uid}`, requestId: req.id
+    });
+    res.json({ success: true, ...resumen, message: `${resumen.liquidadas} apuestas liquidadas.` });
   } catch (error) {
     responderError(res, req, error, '/api/apuestas/liquidar');
   }
@@ -1401,8 +1383,6 @@ async function liquidarApuestasAutomatico() {
       { path: 'tennis/atp/scoreboard', sport: 'tennis' },
       { path: 'tennis/wta/scoreboard', sport: 'tennis' }
     ];
-    const apSnap = await db.ref('apuestas').once('value');
-    const todas = apSnap.val() || {};
     let liquidadas = 0;
     for (const dep of rutas) {
       try {
@@ -1428,31 +1408,8 @@ async function liquidarApuestasAutomatico() {
           else if (hs < as2) resultado = 'Visitante';
           else if (dep.sport === 'soccer') resultado = 'Empate';
           if (!resultado) continue;
-          for (const uid of Object.keys(todas)) {
-            for (const bid of Object.keys(todas[uid] || {})) {
-              const ap = todas[uid][bid];
-              if (!ap || ap.estado !== 'pendiente') continue;
-              if (!ap.eventoNombre || ap.eventoNombre.toLowerCase().trim() !== nombre.toLowerCase().trim()) continue;
-              const gano = ap.tipo === resultado;
-              await db.ref('apuestas/' + uid + '/' + bid + '/estado').set(gano ? 'ganada' : 'perdida');
-              if (gano) {
-                const premio = parseFloat(ap.monto) * parseFloat(ap.cuota);
-                await db.ref('users/' + uid + '/creditoReal').transaction(function(cur){ return (cur || 0) + premio; });
-                const uSnap = await db.ref('users/' + uid + '/nombre').once('value');
-                const u = { nombre: uSnap.val() ? escaparHtml(String(uSnap.val()).split(' ')[0]) : null };
-                const NL2 = String.fromCharCode(10);
-                const sep = '------------------------';
-                let msg = 'APUESTA GANADA' + NL2 + sep + NL2;
-                msg += 'Usuario: ' + (u.nombre || 'Usuario') + NL2;
-                msg += 'Evento: ' + escaparHtml(ap.eventoNombre) + NL2;
-                msg += 'Seleccion: ' + ap.tipo + ' | Cuota: x' + parseFloat(ap.cuota).toFixed(2) + NL2;
-                msg += 'Apostado: $' + parseFloat(ap.monto).toFixed(2) + ' | Ganancia: $' + premio.toFixed(2) + NL2;
-                msg += 'Felicitaciones ' + (u.nombre || 'campeon') + '! Sigue en BetGroup Pro!';
-                await notificarTelegram(msg);
-              }
-              liquidadas++;
-            }
-          }
+          const r = await liquidarEvento({ eventoId: ev.id, nombre, resultado, origen: 'auto' });
+          liquidadas += r.liquidadas;
         }
       } catch(e) { console.error('AutoLiq error:', e.message); }
     }
