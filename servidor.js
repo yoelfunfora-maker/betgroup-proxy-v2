@@ -13,10 +13,11 @@ const { crearAuditoria } = require('./lib/auditoria');
 const { crearAutenticacion, NIVEL } = require('./lib/autenticacion');
 const validar = require('./lib/validacion');
 const { crearMotorApuestas, ErrorApuesta } = require('./lib/apuestas');
-const { crearRanking, semanaPorId, semanaAnterior } = require('./lib/ranking');
+const { crearRanking, semanaDe, semanaPorId, semanaAnterior } = require('./lib/ranking');
 const imagenes = require('./lib/imagenes');
 const { crearApiFootball } = require('./lib/apiFootball');
 const { crearAntifraude } = require('./lib/antifraude');
+const { crearComisiones } = require('./lib/comisiones');
 const { fusionarCuotasBot } = require('./lib/mercadosBot');
 const { leerMarcador } = require('./lib/mercados');
 const { crearProxyDb } = require('./lib/proxyDb');
@@ -115,6 +116,9 @@ const apiFootball = crearApiFootball({ db, obtenerClave: claveApiFootball });
 
 // Antifraude propio (ver lib/antifraude.js): solo avisa, no bloquea.
 const antifraude = crearAntifraude({ db, secreto: config.auditoriaSecreto, notificarTelegram: (t) => notificarTelegram(t), escaparHtml: (t) => escaparHtml(t) });
+
+// Comisiones semanales de agentes y supervisores (ver lib/comisiones.js).
+const comisiones = crearComisiones({ db, auditoria, notificarTelegram: (t) => notificarTelegram(t), escaparHtml: (t) => escaparHtml(t) });
 
 // ==================== CACHÉ ====================
 
@@ -826,7 +830,7 @@ app.get('/api/ping', (req, res) => {
 
 // Versión del servidor: el script de publicación espera a que Render tenga esta antes de subir la web.
 app.get('/api/version', (req, res) => {
-  res.json({ version: 'etapa10' });
+  res.json({ version: 'etapa11' });
 });
 
 app.get('/api/health', (req, res) => {
@@ -963,6 +967,25 @@ app.post('/api/admin/clave-api-football', soloCEO, operacion(async (req) => {
   await auditoria.registrarSeguro({ accion: 'clave_api_football_guardada', actor: req.usuario.uid, requestId: req.id, detalles: { plan: info.plan } });
   return { guardada: true, ...info };
 }));
+// ---------- Comisiones de la red ----------
+// Agente: las suyas · Supervisor: las de sus agentes · CEO: todo. Semana actual en vivo; las
+// semanas cerradas se leen tal como se guardaron.
+app.get('/api/comisiones', requerirSesion, requerirNivel(NIVEL.SUBADMIN), operacion(async (req) => {
+  const sem = req.query?.semana ? semanaPorId(req.query.semana) : semanaDe();
+  if (!sem) throw new ErrorOperacion(400, 'Semana inválida (usa la fecha del lunes, AAAA-MM-DD)');
+  const guardada = (await db.ref(`comisionesSemana/${sem.id}`).once('value')).val();
+  const tabla = guardada && guardada.cerrada ? guardada : await comisiones.calcular(sem);
+  return { ...comisiones.filtrarPara(req.usuario, tabla), cerrada: Boolean(guardada && guardada.cerrada) };
+}));
+app.post('/api/admin/comisiones/cerrar', soloCEO, operacion(async (req) => {
+  const sem = semanaPedida(req.body?.semana);
+  try { return await comisiones.cerrar(sem, req.usuario.uid, req.id); } catch (err) {
+    if (err.estado) throw new ErrorOperacion(err.estado, err.message);
+    throw err;
+  }
+}));
+app.post('/api/admin/asignar-supervisor', soloCEO, operacion((req) => operaciones.asignarSupervisor(req)));
+
 // ---------- Antifraude ----------
 // El móvil manda su identificador (aleatorio) y su huella técnica al entrar; se guardan cifrados.
 const limiteDispositivo = limitador({ ventanaMs: 60 * 60 * 1000, maximo: 30, clave: porUsuario });
