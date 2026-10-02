@@ -4,7 +4,8 @@
   "main": "servidor.js",
   "scripts": {
     "start": "node servidor.js",
-    "dev": "node servidor.js"
+    "dev": "node servidor.js",
+    "test": "node test/ejecutar.js"
   },
   "dependencies": {
     "axios": "^1.20.0",
