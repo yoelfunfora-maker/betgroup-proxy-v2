@@ -14,6 +14,7 @@ const { crearAutenticacion, NIVEL } = require('./lib/autenticacion');
 const validar = require('./lib/validacion');
 const { crearMotorApuestas, ErrorApuesta } = require('./lib/apuestas');
 const { fusionarCuotasBot } = require('./lib/mercadosBot');
+const { leerMarcador } = require('./lib/mercados');
 const { crearProxyDb } = require('./lib/proxyDb');
 const { crearOperaciones, ErrorOperacion } = require('./lib/operaciones');
 const { Denegado, Invalido, DIRECTOR } = require('./lib/politicas');
@@ -154,7 +155,7 @@ function fetchESPN(path) {
 
 // ==================== PARSE EVENTS ====================
 
-function parseEvents(espnData, sport) {
+function parseEvents(espnData, sport, ruta = null) {
   const events = [];
   if (!espnData || !espnData.events) return events;
 
@@ -226,6 +227,7 @@ function parseEvents(espnData, sport) {
       events.push({
         id: ev.id,
         sport,
+        ruta, // competición en ESPN: permite liquidar el partido días después
         liga: espnData.leagues?.[0]?.name || sport,
         ligaLogo: espnData.leagues?.[0]?.logos?.[0]?.href || null,
         local: getName(home),
@@ -262,7 +264,7 @@ function limpiarNombre(nombre) {
     .replace(/^ny\b|\bny$/g, 'new york')
     .replace(/^la\b|\bla$/g, 'los angeles')
     .replace(/^st\b|\bst\.?$/g, 'saint')
-    .replace(/\b(fc|cf|sc|ac|united|city|club|deportivo|real|san|los|las|the|of)\b/g, '')
+    .replace(/\b(fc|cf|sc|ac|club|deportivo|the|of)\b/g, '') // 'city', 'united', 'real'... distinguen equipos
     .replace(/[^a-z0-9ñ ]/g, ' ')
     .replace(/\s+/g, ' ')
     .trim();
@@ -344,14 +346,11 @@ function coincideEquipo(evento, game) {
     const homeL = limpiarNombre(homeAPI);
     const awayL = limpiarNombre(awayAPI);
 
-    scoreDirecto = Math.max(
-      sorensenDice(localL, homeL) * 0.6 + jaccardTokens(localL, homeL) * 0.4,
-      sorensenDice(visitL, awayL) * 0.6 + jaccardTokens(visitL, awayL) * 0.4
-    );
-    scoreCruzado = Math.max(
-      sorensenDice(localL, awayL) * 0.6 + jaccardTokens(localL, awayL) * 0.4,
-      sorensenDice(visitL, homeL) * 0.6 + jaccardTokens(visitL, homeL) * 0.4
-    );
+    // Tienen que parecerse LOS DOS equipos (antes bastaba uno: "Chelsea vs X" recibía
+    // las cuotas de "Chelsea vs Y"). Se toma el peor de los dos parecidos.
+    const parecido = (a, b) => sorensenDice(a, b) * 0.6 + jaccardTokens(a, b) * 0.4;
+    scoreDirecto = Math.min(parecido(localL, homeL), parecido(visitL, awayL));
+    scoreCruzado = Math.min(parecido(localL, awayL), parecido(visitL, homeL));
   }
 
   const score = Math.max(scoreDirecto, scoreCruzado);
@@ -512,117 +511,52 @@ async function enriquecerConCuotas(eventos) {
       }
     }
   }
-  // FALLBACK INTELIGENTE: HF para eventos sin cuotas reales
-  const MARGEN = 0.20;
-  const HF_CUOTAS_TTL = 6 * 60 * 60 * 1000; // 6 horas
-  const sinCuotas = eventos.filter(function(ev){ return !ev.cuota_local || ev.cuota_local === 0; });
-
-  for (const ev of sinCuotas) {
-    const cacheKey = 'hf_cuota_' + ev.local + '_vs_' + ev.visitante;
-    const cached = getCache(cacheKey);
-    if (cached && (Date.now() - cached.timestamp) < HF_CUOTAS_TTL) {
-      ev.cuota_local = cached.cuota_local;
-      ev.cuota_visitante = cached.cuota_visitante;
-      if (cached.cuota_empate) ev.cuota_empate = cached.cuota_empate;
-      ev.fuenteCuotas = 'hf-cache';
-      continue;
-    }
-
-    // Obtener record ESPN si existe en el evento
-    const recordLocal = ev.recordLocal || '';
-    const recordVisitante = ev.recordVisitante || '';
-    const tieneEmpate = ev.sport === 'soccer';
-
-    const promptCuotas = 'Eres un analista deportivo experto. Genera cuotas de apuestas realistas para este partido de ' + (ev.sport || 'deporte') + ':' +
-      ' Local: ' + ev.local + (recordLocal ? ' (record: ' + recordLocal + ')' : '') +
-      ' vs Visitante: ' + ev.visitante + (recordVisitante ? ' (record: ' + recordVisitante + ')' : '') +
-      '. Liga: ' + (ev.liga || ev.sport) +
-      '. Aplica un margen de casa del 20%.' +
-      (tieneEmpate ? ' Incluye cuota de empate.' : '') +
-      ' Responde SOLO con JSON valido sin explicaciones: ' +
-      (tieneEmpate ? '{local:X.XX,visitante:X.XX,empate:X.XX}' : '{local:X.XX,visitante:X.XX}');
-
-    try {
-      const reply = await callCF([{ role: 'user', content: promptCuotas }], 'rapido').catch(function(){ return ''; });
-      const match = reply.match(/\{[^}]+\}/);
-      if (match) {
-        const cuotas = JSON.parse(match[0]);
-        if (cuotas.local && cuotas.visitante) {
-          ev.cuota_local = parseFloat(cuotas.local);
-          ev.cuota_visitante = parseFloat(cuotas.visitante);
-          if (cuotas.empate) ev.cuota_empate = parseFloat(cuotas.empate);
-          ev.fuenteCuotas = 'hf-kimi';
-          setCache(cacheKey, { cuota_local: ev.cuota_local, cuota_visitante: ev.cuota_visitante, cuota_empate: ev.cuota_empate || null, timestamp: Date.now() });
-          console.log('Cuota HF generada para: ' + ev.local + ' vs ' + ev.visitante + ' -> ' + ev.cuota_local + '/' + ev.cuota_visitante);
-          continue;
-        }
-      }
-    } catch(hfErr) {
-      console.error('Error HF cuotas:', hfErr.message);
-    }
-
-    // ULTIMO RECURSO: fallback matematico determinista
-    const seed = (ev.local + ev.visitante).split('').reduce(function(a,c){ return a + c.charCodeAt(0); }, 0);
-    const rand = function(min, max) {
-      const x = Math.sin(seed + min * 100) * 10000;
-      return min + (x - Math.floor(x)) * (max - min);
-    };
-    const bases = {
-      soccer:     { localMin: 1.40, localMax: 3.50, visitanteMin: 1.40, visitanteMax: 4.00, empate: true },
-      baseball:   { localMin: 1.50, localMax: 2.80, visitanteMin: 1.50, visitanteMax: 2.80, empate: false },
-      basketball: { localMin: 1.30, localMax: 2.50, visitanteMin: 1.50, visitanteMax: 2.80, empate: false },
-      tennis:     { localMin: 1.25, localMax: 3.50, visitanteMin: 1.25, visitanteMax: 3.50, empate: false },
-      mma:        { localMin: 1.30, localMax: 4.00, visitanteMin: 1.30, visitanteMax: 4.00, empate: false }
-    };
-    const cfg = bases[ev.sport] || bases.soccer;
-    ev.cuota_local = parseFloat((rand(cfg.localMin, cfg.localMax) * (1 - MARGEN)).toFixed(2));
-    ev.cuota_visitante = parseFloat((rand(cfg.visitanteMin, cfg.visitanteMax) * (1 - MARGEN)).toFixed(2));
-    if (cfg.empate) ev.cuota_empate = parseFloat((rand(2.80, 3.80) * (1 - MARGEN)).toFixed(2));
-    ev.fuenteCuotas = 'fallback';
-    console.log('Cuota fallback para: ' + ev.local + ' vs ' + ev.visitante);
-  }
+  // Sin cuota real NO se inventa ninguna (antes se pedía a una IA o se generaba "al azar"
+  // con un 20% de margen, lo que podía dar cuotas ≤ 1). Esos partidos salen bloqueados.
   return eventos;
 }
 
 
 // ==================== PRECALENTAR CACHÉ ====================
 
+// Competiciones que se ofrecen (y que la liquidación automática revisa).
+const DEPORTES = [
+  { path: 'basketball/nba/scoreboard', sport: 'basketball' },
+  { path: 'baseball/mlb/scoreboard', sport: 'baseball' },
+  { path: 'soccer/fifa.world/scoreboard', sport: 'soccer' },
+  { path: 'soccer/fifa.friendly/scoreboard', sport: 'soccer' },
+  { path: 'soccer/eng.1/scoreboard', sport: 'soccer' },
+  { path: 'soccer/esp.1/scoreboard', sport: 'soccer' },
+  { path: 'soccer/ger.1/scoreboard', sport: 'soccer' },
+  { path: 'soccer/ita.1/scoreboard', sport: 'soccer' },
+  { path: 'soccer/fra.1/scoreboard', sport: 'soccer' },
+  { path: 'soccer/usa.1/scoreboard', sport: 'soccer' },
+  { path: 'soccer/mex.1/scoreboard', sport: 'soccer' },
+  { path: 'soccer/bra.1/scoreboard', sport: 'soccer' },
+  { path: 'soccer/ned.1/scoreboard', sport: 'soccer' },
+  { path: 'soccer/arg.1/scoreboard', sport: 'soccer' },
+  { path: 'soccer/por.1/scoreboard', sport: 'soccer' },
+  { path: 'soccer/nor.1/scoreboard', sport: 'soccer' },
+  { path: 'soccer/swe.1/scoreboard', sport: 'soccer' },
+  { path: 'soccer/den.1/scoreboard', sport: 'soccer' },
+  { path: 'soccer/pol.1/scoreboard', sport: 'soccer' },
+  { path: 'soccer/rus.1/scoreboard', sport: 'soccer' },
+  { path: 'soccer/chi.1/scoreboard', sport: 'soccer' },
+  { path: 'soccer/conmebol.libertadores/scoreboard', sport: 'soccer' },
+  { path: 'tennis/wta/scoreboard', sport: 'tennis' },
+  { path: 'mma/ufc/scoreboard', sport: 'mma' }
+];
+
 async function precalentarCache() {
   console.log('⏳ Precalentando caché...');
 
-  const deportes = [
-    { path: 'basketball/nba/scoreboard', sport: 'basketball' },
-    { path: 'baseball/mlb/scoreboard', sport: 'baseball' },
-    { path: 'soccer/fifa.world/scoreboard', sport: 'soccer' },
-    { path: 'soccer/fifa.friendly/scoreboard', sport: 'soccer' },
-    { path: 'soccer/eng.1/scoreboard', sport: 'soccer' },
-    { path: 'soccer/esp.1/scoreboard', sport: 'soccer' },
-    { path: 'soccer/ger.1/scoreboard', sport: 'soccer' },
-    { path: 'soccer/ita.1/scoreboard', sport: 'soccer' },
-    { path: 'soccer/fra.1/scoreboard', sport: 'soccer' },
-    { path: 'soccer/usa.1/scoreboard', sport: 'soccer' },
-    { path: 'soccer/mex.1/scoreboard', sport: 'soccer' },
-    { path: 'soccer/bra.1/scoreboard', sport: 'soccer' },
-    { path: 'soccer/ned.1/scoreboard', sport: 'soccer' },
-    { path: 'soccer/arg.1/scoreboard', sport: 'soccer' },
-    { path: 'soccer/por.1/scoreboard', sport: 'soccer' },
-    { path: 'soccer/nor.1/scoreboard', sport: 'soccer' },
-    { path: 'soccer/swe.1/scoreboard', sport: 'soccer' },
-    { path: 'soccer/den.1/scoreboard', sport: 'soccer' },
-    { path: 'soccer/pol.1/scoreboard', sport: 'soccer' },
-    { path: 'soccer/rus.1/scoreboard', sport: 'soccer' },
-    { path: 'soccer/chi.1/scoreboard', sport: 'soccer' },
-    { path: 'soccer/conmebol.libertadores/scoreboard', sport: 'soccer' },
-    { path: 'tennis/wta/scoreboard', sport: 'tennis' },
-    { path: 'mma/ufc/scoreboard', sport: 'mma' }
-  ];
 
   let allEvents = [];
 
-  for (const deporte of deportes) {
+  for (const deporte of DEPORTES) {
     try {
       const data = await fetchESPN(deporte.path);
-      const eventos = parseEvents(data, deporte.sport);
+      const eventos = parseEvents(data, deporte.sport, deporte.path.replace(/\/scoreboard$/, ''));
       allEvents = allEvents.concat(eventos);
     } catch(err) {
       console.error(`Error ${deporte.path}:`, err.message);
@@ -711,6 +645,9 @@ app.post('/api/solicitudes-deposito/:id/rechazar', directorOMas, operacion(conId
 app.post('/api/admin/ajustar-saldo', soloCEO, operacion((req) => operaciones.ajustarSaldo(req)));
 app.post('/api/admin/asignar-rol', soloCEO, operacion((req) => operaciones.asignarRol(req)));
 app.post('/api/admin/restablecer-clave', soloCEO, operacion((req) => operaciones.restablecerClave(req)));
+app.post('/api/admin/eliminar-usuario', soloCEO, operacion((req) => operaciones.eliminarUsuario(req)));
+// Liquidación automática bajo demanda (el CEO no tiene que esperar los 30 min).
+app.post('/api/admin/liquidar-ahora', soloCEO, operacion(async () => ({ liquidadas: await liquidarApuestasAutomatico() })));
 // Avisos a Telegram desde el navegador: el token ya no viaja al frontend.
 app.post('/api/notificar', requerirSesion, limiteAvisos, operacion((req) => operaciones.notificar(req)));
 
@@ -832,14 +769,9 @@ app.post('/api/huggingface/cuotas', soloCEO, limiteIA, async (req, res) => {
   if (!prompt) return res.status(400).json({ error: 'Falta prompt' });
   const model = modelo || HF_MODELS.analisis;
   try {
-    const resp = { ok: true };
-    const _cfReply1 = await callCF([{ role: 'user', content: prompt }], 'analisis');
-    const resp1_data = { choices: [{ message: { content: _cfReply1 } }] };
-    const data = await resp.json();
-    const reply = data && data.choices && data.choices[0] && data.choices[0].message
-      ? data.choices[0].message.content
-      : JSON.stringify(data);
-    res.json({ reply: reply, model: model });
+    // Antes llamaba a resp.json() sobre un objeto normal y fallaba siempre.
+    const reply = await callCF([{ role: 'user', content: String(prompt).slice(0, 2000) }], 'analisis');
+    res.json({ reply, model });
   } catch(err) {
     console.error('Error /api/huggingface/cuotas:', err.message);
     res.status(500).json({ error: 'Error al contactar Hugging Face' });
@@ -1051,10 +983,10 @@ async function avisarApuestaGanada(uid, ap) {
 }
 
 // Liquida todas las apuestas pendientes de un evento (por id o por nombre).
-async function liquidarEvento({ eventoId, nombre, resultado, origen, requestId }) {
+async function liquidarEvento({ eventoId, nombre, resolucion, origen, requestId }) {
   const todas = (await db.ref('apuestas').once('value')).val() || {};
   const nombreNorm = String(nombre || '').toLowerCase().trim();
-  const resumen = { liquidadas: 0, ganadas: 0, perdidas: 0, anuladas: 0 };
+  const resumen = { liquidadas: 0, ganadas: 0, perdidas: 0, anuladas: 0, sinDecidir: 0 };
   for (const uid of Object.keys(todas)) {
     for (const betId of Object.keys(todas[uid] || {})) {
       const ap = todas[uid][betId];
@@ -1062,8 +994,9 @@ async function liquidarEvento({ eventoId, nombre, resultado, origen, requestId }
       const coincide = (eventoId && ap.eventoId && String(ap.eventoId) === String(eventoId))
         || (nombreNorm && String(ap.eventoNombre || '').toLowerCase().trim() === nombreNorm);
       if (!coincide) continue;
-      const r = await motor.liquidarApuesta({ uid, betId, resultado, origen, requestId });
-      if (!r) continue; // otra liquidación llegó antes: no se paga dos veces
+      const r = await motor.liquidarApuesta({ uid, betId, resolucion, origen, requestId });
+      // null: otra liquidación llegó antes (no se paga dos veces) o faltan datos (p. ej. hándicap sin marcador)
+      if (!r) { resumen.sinDecidir++; continue; }
       resumen.liquidadas++;
       if (r.estado === 'ganada') { resumen.ganadas++; await avisarApuestaGanada(uid, r); }
       else if (r.estado === 'perdida') resumen.perdidas++;
@@ -1074,20 +1007,26 @@ async function liquidarEvento({ eventoId, nombre, resultado, origen, requestId }
 }
 
 app.post('/api/apuestas/liquidar', soloCEO, async (req, res) => {
-  // partidoId puede ser el id del evento o el nombre "Local vs Visitante".
+  // partidoId: id del evento o nombre "Local vs Visitante".
+  // Se indica el marcador final ("2-1", resuelve todos los mercados), o solo el ganador
+  // (Local/Visitante/Empate, resuelve 1X2), o ANULADA (devuelve lo apostado).
   const partidoId = validar.texto(req.body?.partidoId, 200);
   const r = req.body?.resultadoGanador;
-  const resultadoGanador = r === 'ANULADA' ? 'ANULADA' : validar.tipoApuesta(r);
-  if (!partidoId || !resultadoGanador) {
-    return res.status(400).json({ error: 'partidoId y resultadoGanador (Local, Visitante, Empate o ANULADA) requeridos' });
+  const marcador = leerMarcador(req.body?.marcador);
+  let resolucion = null;
+  if (r === 'ANULADA') resolucion = { anular: true };
+  else if (marcador) resolucion = { marcador };
+  else if (['Local', 'Visitante', 'Empate'].includes(r)) resolucion = { ganador: r };
+  if (!partidoId || !resolucion) {
+    return res.status(400).json({ error: 'Indica partidoId y el marcador final ("2-1"), el ganador (Local, Visitante, Empate) o ANULADA' });
   }
   await auditoria.registrarSeguro({
     accion: 'liquidacion_manual', actor: req.usuario.uid, objetivo: partidoId,
-    requestId: req.id, detalles: { resultadoGanador }
+    requestId: req.id, detalles: { resultadoGanador: r || null, marcador: req.body?.marcador || null }
   });
   try {
     const resumen = await liquidarEvento({
-      eventoId: partidoId, nombre: partidoId, resultado: resultadoGanador,
+      eventoId: partidoId, nombre: partidoId, resolucion,
       origen: `manual:${req.usuario.uid}`, requestId: req.id
     });
     res.json({ success: true, ...resumen, message: `${resumen.liquidadas} apuestas liquidadas.` });
@@ -1441,48 +1380,112 @@ async function enviarReporteTelegram() {
   } catch(e) { console.error('Error reporte:', e.message); }
 }
 
+// ==================== LIQUIDACIÓN AUTOMÁTICA ====================
+// Cada 30 min: busca en ESPN el resultado de los partidos con apuestas pendientes
+// (en su competición y en la fecha en que se jugaron) y las resuelve.
+const ESTADOS_ANULAN = /CANCEL|ABANDON|FORFEIT/;          // se devuelve el dinero
+const ESTADOS_APLAZADOS = /POSTPON|SUSPEND|DELAY/;          // se devuelve si pasan 48 h
+const ESPERA_APLAZADO_MS = 48 * 60 * 60 * 1000;
+
+function fechaEspn(ms) {
+  const d = new Date(ms);
+  return `${d.getUTCFullYear()}${String(d.getUTCMonth() + 1).padStart(2, '0')}${String(d.getUTCDate()).padStart(2, '0')}`;
+}
+
+// Traduce un evento terminado de ESPN a una resolución (o null si aún no se sabe).
+function resolucionDeEspn(ev, sport) {
+  const tipo = (ev.competitions && ev.competitions[0] && ev.competitions[0].status && ev.competitions[0].status.type) || (ev.status && ev.status.type) || {};
+  const nombreEstado = String(tipo.name || '').toUpperCase();
+  if (ESTADOS_ANULAN.test(nombreEstado)) return { anular: true };
+  if (ESTADOS_APLAZADOS.test(nombreEstado)) {
+    const inicio = Date.parse(ev.date);
+    return Number.isFinite(inicio) && Date.now() - inicio > ESPERA_APLAZADO_MS ? { anular: true } : null;
+  }
+  if (tipo.state !== 'post' || tipo.completed === false) return null;
+
+  const comp = ev.competitions && ev.competitions[0];
+  const competidores = (comp && comp.competitors) || [];
+  if (competidores.length < 2) return null;
+  let local = competidores.find(c => c.homeAway === 'home');
+  let visitante = competidores.find(c => c.homeAway === 'away');
+  if (!local || !visitante) { local = competidores[0]; visitante = competidores[1]; }
+
+  // Tenis y UFC: el "marcador" no son goles; se usa quién ganó.
+  if (sport === 'tennis' || sport === 'mma' || sport === 'boxing') {
+    if (local.winner === true) return { ganador: 'Local' };
+    if (visitante.winner === true) return { ganador: 'Visitante' };
+    return null;
+  }
+  const gl = Number(local.score && typeof local.score === 'object' ? local.score.value : local.score);
+  const gv = Number(visitante.score && typeof visitante.score === 'object' ? visitante.score.value : visitante.score);
+  if (!Number.isFinite(gl) || !Number.isFinite(gv)) return null;
+  return { marcador: { local: gl, visitante: gv } };
+}
+
+let liquidandoAhora = false;
 async function liquidarApuestasAutomatico() {
+  if (liquidandoAhora) return 0; // nunca dos rondas a la vez
+  liquidandoAhora = true;
   try {
-    const rutas = [
-      { path: 'baseball/mlb/scoreboard', sport: 'baseball' },
-      { path: 'soccer/fifa.world/scoreboard', sport: 'soccer' },
-      { path: 'basketball/nba/scoreboard', sport: 'basketball' },
-      { path: 'mma/ufc/scoreboard', sport: 'mma' },
-      { path: 'tennis/atp/scoreboard', sport: 'tennis' },
-      { path: 'tennis/wta/scoreboard', sport: 'tennis' }
-    ];
-    let liquidadas = 0;
-    for (const dep of rutas) {
-      try {
-        const data = await fetchESPN(dep.path);
-        for (const ev of (data.events || [])) {
-          const state = ev.status && ev.status.type ? ev.status.type.state : '';
-          if (state !== 'post') continue;
-          const comp = ev.competitions && ev.competitions[0] ? ev.competitions[0] : null;
-          if (!comp) continue;
-          let home = null, away = null;
-          for (const t of (comp.competitors || [])) {
-            if (t.homeAway === 'home') home = t;
-            if (t.homeAway === 'away') away = t;
-          }
-          if (!home || !away) continue;
-          const hs = parseInt(home.score || 0);
-          const as2 = parseInt(away.score || 0);
-          const hn = home.team ? home.team.displayName : '';
-          const an = away.team ? away.team.displayName : '';
-          const nombre = hn + ' vs ' + an;
-          let resultado = null;
-          if (hs > as2) resultado = 'Local';
-          else if (hs < as2) resultado = 'Visitante';
-          else if (dep.sport === 'soccer') resultado = 'Empate';
-          if (!resultado) continue;
-          const r = await liquidarEvento({ eventoId: ev.id, nombre, resultado, origen: 'auto' });
-          liquidadas += r.liquidadas;
+    const todas = (await db.ref('apuestas').once('value')).val() || {};
+    // Qué consultar: cada competición en las fechas de sus partidos pendientes.
+    const consultas = new Map(); // ruta -> Set(fechas)
+    const idsPendientes = new Set();
+    const nombresPendientes = new Set();
+    let pendientes = 0;
+    for (const delUsuario of Object.values(todas)) {
+      for (const ap of Object.values(delUsuario || {})) {
+        if (!ap || ap.estado !== 'pendiente') continue;
+        pendientes++;
+        if (ap.eventoId) idsPendientes.add(String(ap.eventoId));
+        if (ap.eventoNombre) nombresPendientes.add(String(ap.eventoNombre).toLowerCase().trim());
+        if (ap.ruta) {
+          const inicio = Date.parse(ap.horaInicio) || Number(ap.fecha) || Date.now();
+          if (!consultas.has(ap.ruta)) consultas.set(ap.ruta, new Set());
+          // ESPN agrupa por día de EE. UU.: se mira el día UTC y el anterior.
+          consultas.get(ap.ruta).add(fechaEspn(inicio)).add(fechaEspn(inicio - 86400000));
         }
-      } catch(e) { console.error('AutoLiq error:', e.message); }
+      }
+    }
+    if (pendientes === 0) return 0;
+    // Apuestas antiguas (sin ruta): se revisan las competiciones del día.
+    for (const d of DEPORTES.concat([{ path: 'tennis/atp/scoreboard', sport: 'tennis' }])) {
+      const ruta = d.path.replace(/\/scoreboard$/, '');
+      if (!consultas.has(ruta)) consultas.set(ruta, new Set());
+      consultas.get(ruta).add('');
+    }
+
+    let liquidadas = 0;
+    for (const [ruta, fechas] of consultas) {
+      const sport = ruta.split('/')[0];
+      for (const fecha of fechas) {
+        try {
+          const data = await fetchESPN(`${ruta}/scoreboard${fecha ? `?dates=${fecha}` : ''}`);
+          for (const ev of (data.events || [])) {
+            const resolucion = resolucionDeEspn(ev, sport);
+            if (!resolucion) continue;
+            const comp = ev.competitions && ev.competitions[0];
+            const cs = (comp && comp.competitors) || [];
+            const home = cs.find(c => c.homeAway === 'home') || cs[0];
+            const away = cs.find(c => c.homeAway === 'away') || cs[1];
+            const nombre = (n) => (n && ((n.team && n.team.displayName) || (n.athlete && n.athlete.displayName))) || '';
+            const nombreEv = `${nombre(home)} vs ${nombre(away)}`;
+            // Solo se procesa si hay apuestas pendientes de este partido.
+            if (!idsPendientes.has(String(ev.id)) && !nombresPendientes.has(nombreEv.toLowerCase().trim())) continue;
+            const r = await liquidarEvento({ eventoId: ev.id, nombre: nombreEv, resolucion, origen: 'auto' });
+            liquidadas += r.liquidadas;
+          }
+        } catch (e) { console.error('AutoLiq', ruta, fecha, e.message); }
+      }
     }
     if (liquidadas > 0) console.log('Auto-liquidadas: ' + liquidadas);
-  } catch(e) { console.error('Error auto-liq:', e.message); }
+    return liquidadas;
+  } catch (e) {
+    console.error('Error auto-liq:', e.message);
+    return 0;
+  } finally {
+    liquidandoAhora = false;
+  }
 }
 
 async function enviarMonitoreo24h() {
