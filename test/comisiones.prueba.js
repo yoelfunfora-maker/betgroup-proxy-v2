@@ -32,6 +32,9 @@ for (let i = 1; i <= 7; i++) {
 }
 set('apuestas/BG_a1/g1', { monto: 2000, cuota: 3, estado: 'ganada', pago: 6000, fecha: tp, liquidadaEn: tp, tipoSaldo: 'real' }); // +2000 apostado, −6000 pagado
 set('apuestas/BG_a2/promo', { monto: 100, cuota: 2.5, estado: 'ganada', pago: 150, fecha: tp, liquidadaEn: tp, tipoSaldo: 'promo', saldoCampo: 'creditoPromo', reglaPromo: 'ganancia-a-real' });
+// Cuenta que solo juega el bono (y pierde): es jugador de A pero NO cuenta como activo.
+usuario('BG_a8', { nombre: 'Solo bono', rol: 'member', rolLevel: 1, referidoPorUid: 'BG_A' });
+set('apuestas/BG_a8/bono', { monto: 100, cuota: 2, estado: 'perdida', pago: 0, fecha: tp, liquidadaEn: tp, tipoSaldo: 'promo', saldoCampo: 'creditoPromo', reglaPromo: 'ganancia-a-real' });
 set('apuestas/BG_a3/pend', { monto: 500, cuota: 2, estado: 'pendiente', fecha: tp, tipoSaldo: 'real' }); // pendiente: no cuenta
 // Agente B: 2 jugadores que GANARON a la casa 1.000 la semana pasada; esta semana pierden 1.500.
 usuario('BG_b1', { nombre: 'Jugador b1', rol: 'member', rolLevel: 1, referidoPor: 'BGB0001' });
@@ -52,7 +55,7 @@ const entrar = async (uid) => (await llamar('POST', '/api/auth/login', { identif
     // ---- Semana pasada (vista del CEO) ----
     [s, j] = await llamar('GET', `/api/comisiones?semana=${pasada.id}`, null, t.BG_ceo);
     const A = j.agentes.find(a => a.uid === 'BG_A'), B = j.agentes.find(a => a.uid === 'BG_B');
-    ok(s === 200 && A.jugadores === 7 && A.activos === 7, 'el agente A tiene sus 7 jugadores (código fijo, código generado y ligados)');
+    ok(s === 200 && A.jugadores === 8 && A.activos === 7, 'el agente A tiene 8 jugadores, pero solo 7 activos: el que solo jugó el bono no cuenta');
     ok(A.ganancia === 5850, 'ganancia de la red de A: 12.000 apostado − 6.000 pagado − 150 de promo (la pendiente no cuenta) → ' + A.ganancia);
     ok(A.pct === 0.10 && A.comisionAgente === 585, '7 activos → 10 % para el agente: 585 CR');
     ok(A.comisionSupervisor === 292.5 && A.casa === 4972.5, 'supervisora 5 %: 292,5 CR · casa: 4.972,5 CR (≥ 70 %)');
