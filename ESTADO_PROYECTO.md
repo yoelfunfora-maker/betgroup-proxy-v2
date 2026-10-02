@@ -1,8 +1,8 @@
-# Estado del proyecto — BetGroup Pro (backend real: betgroup-proxy-v2)
+# Estado del proyecto — BetGroup Pro (repo único: betgroup-proxy-v2)
 
 **Este archivo es el "mismo sitio" real que exige el Protocolo de trabajo de Fundora — cualquier sistema de IA (Claude, DeepSeek, Gemini, u otro) que trabaje aquí debe leerlo primero, y actualizarlo al final de cada sesión real.**
 
-Última actualización: 24 de agosto de 2026.
+Última actualización: 2 de octubre de 2026 (auditoría completa de seguridad).
 
 ## ⚠️ Protocolo de trabajo OBLIGATORIO para este proyecto (más estricto que el resto)
 
@@ -13,33 +13,50 @@
 - Consolidar los comandos de bash en bloques únicos
 - Autorización explícita de Yoel antes de implementar cualquier cambio real
 
-## Stack real
+## Repos: este es el único que se conserva
 
-**Este único servicio de Render sirve el backend Y el frontend juntos** (confirmado por Yoel, 24 ago) — `betgroup-cuba-2024.web.app` NO se despliega vía Firebase Hosting como se creía antes, se sirve desde aquí mismo. El repo `betgroup-pro` está casi vacío y no participa del despliegue real — ver su propio ESTADO_PROYECTO.md.
+| Repo | Estado |
+|---|---|
+| `betgroup-proxy-v2` (este) | **Repo único.** Backend (`servidor.js`) + copia limpia del frontend en `frontend/index.html` |
+| `betgroup-proxy` | Backend viejo + frontend del 26 jun **con claves y datos personales**. Ya rescatado aquí → archivar/eliminar |
+| `betgroup-pro` | README vacío. Nada que rescatar → eliminar |
 
-Node.js/Express en Render + Firebase Realtime Database (la base de datos sí es real de Firebase, solo el hosting del sitio no).
+Dato rescatado de `betgroup-pro`: su documento decía "Despliegue real vía `firebase deploy --only hosting`".
 
-- Servicio real de Render: `srv-d8li6lurnols73evdavg`
-- URL real (backend + frontend): `betgroup-proxy-v2-8vqj.onrender.com`
-- Dominio público real: `betgroup-cuba-2024.web.app` (apunta a este mismo servicio de Render)
-- Archivo real del servidor: `servidor.js` (también existe `server.js`, verificar cuál está activo antes de editar)
+## Stack real (verificado contra el código, 2 oct 2026)
 
-## Qué se sabe del trabajo reciente (por confirmar con Yoel, info de memoria previa)
+- **Backend:** Node.js/Express en Render. Servicio `srv-d8li6lurnols73evdavg`, URL `betgroup-proxy-v2-8vqj.onrender.com`. Arranca `servidor.js` (`npm start`).
+- **Base de datos:** Firebase Realtime Database `betgroup-cuba-2024-default-rtdb`.
+- **Frontend:** `betgroup-cuba-2024.web.app`. **Corrección del documento anterior:** el código de este backend NO sirve páginas web (no hay `express.static` ni `index.html` en todo su historial). Lo más probable es que el frontend se publique con `firebase deploy --only hosting` desde una carpeta local (Termux). Esa carpeta tiene archivos que no están en ningún repo (`buscador-ceo.js`, `logo_fifa.png`, `logo_nba.png`, `icon.png`, `logo.png`…).
+- **Pendiente de Yoel:** subir aquí la carpeta real del frontend (la versión en vivo puede ser más nueva que `frontend/index.html`) y aplicarle los mismos arreglos.
 
-- Corregido bug de ruta ESPN FIFA que causaba HTTP 400 en todos los eventos del Mundial
-- Sistema de respaldo de cuotas de 3 niveles: Odds API → HF Kimi-K2 en caché → respaldo matemático
-- Liquidación de apuestas reactivada con notificaciones de Telegram, automática cada 30 min
-- UptimeRobot configurado para evitar que Render entre en reposo
-- Zona horaria de Cuba corregida a UTC-4
-- V7.5: "Auth Inmune" — login sin depender de Firebase Auth (bloqueado en Cuba), vía WebSocket de RTDB, SHA256+salt+HMAC, respaldo offline en localStorage
+## Variables de entorno (Render → Environment)
 
-## Pendiente real conocido
+Ver `.env.example`. Sin `ADMIN_API_KEY`, las rutas de administración quedan cerradas (503). Sin `TELEGRAM_*`, `ODDS_API_KEYS` o `IMGBB_API_KEY`, esas funciones se desactivan sin romper el resto.
 
-- Error de parseo de clave privada en `serviceAccountKey.json` bajo Node.js en Termux — solución propuesta: migrar a Google Cloud Functions
-- `deleteUser` todavía llama a `localhost:3000` en vez de ir directo a RTDB
-- 3 claves de Odds API rotan según hora del día (renovadas 1 jul) — Yoel mencionó que debería existir una cuarta clave
+Rutas protegidas con la cabecera `x-admin-key`: `/api/apostar`, `/api/apuestas/liquidar`, `/api/admin/*`, `/api/usuarios/mis-referidos`, `/api/agents-status`, `/api/verificacion-geminis`, `/api/estado-sistema`, `/api/test-reporte`, `/api/debug-reporte`. El frontend no usa ninguna de ellas.
+
+Rutas públicas que usa el frontend: `/api/saldo/:uid`, `/api/enriquecer`, `/api/huggingface`, y las nuevas `/api/notificar`, `/api/notificar-foto`, `/api/subir-imagen` (todas con límite de peticiones por IP).
+
+## Hecho en la auditoría del 2 oct 2026
+
+- Claves sacadas del código (Telegram, 3 de Odds API, Gemini, Groq, ImgBB, UptimeRobot). **Las antiguas siguen expuestas en repos públicos: hay que rotarlas.**
+- Candado de administrador en las rutas peligrosas (antes cualquiera podía reiniciar la base de datos, hacerse CEO o liquidar apuestas).
+- `/api/apostar`: monto negativo y cuota inventada bloqueados; descuento con transacción atómica.
+- Errores sin detalles internos; avisos de Telegram sin email ni teléfono; chat sin inyección de prompt.
+- Fotos de comprobantes sin metadatos EXIF/GPS (`limpiarMetadatos.js`).
+- Frontend: fuera la cuenta real precargada, las claves, el código muerto y 22 copias duplicadas; protección XSS con `esc()`.
+- Eliminados `server.js` y `servidor.js.bak_20260601_193450` (siguen en el historial de git).
+
+## Pendiente real (decisión de Yoel pendiente — "punto 5")
+
+Estos puntos dependen de decidir el modelo del proyecto y NO se tocaron:
+
+- **Reglas de Firebase y login:** el "Login Inmune" lee el hash de la contraseña desde la base de datos antes de iniciar sesión, y el navegador escribe saldos directamente. Cerrar las reglas sin un login en el servidor rompería la app; es un cambio de arquitectura.
+- **Motor de apuestas:** liquidación (solo cubre 6 rutas de ESPN), cruce de nombres de equipos (Manchester City/United), cuotas en vivo de 12 h, cuotas generadas por IA o al azar, saldo promo que se paga como real, varios caminos de liquidación sin bloqueo entre ellos, `liquidarApuestaUI` en el navegador.
+- **Contraseñas:** SHA-256 de una sola pasada con un "secreto" que está en el frontend (`HMAC_SECRET`). Cambiarlo invalida todos los logins; requiere migración.
+- `serviceAccountKey.json` en Termux (error de parseo) — la solución propuesta era migrar a Google Cloud Functions.
 
 ## Reglas fijas
 
-- Repo hermano `betgroup-proxy` (sin "-v2") tiene credenciales reales embebidas en archivos versionados — Yoel ya lo sabe, piensa eliminarlo, no requiere acción inmediata
-- Antes de cerrar cualquier ronda: `node -c` sin errores, respaldo hecho, autorización explícita recibida, **y este archivo actualizado y subido**
+- Antes de cerrar cualquier ronda: `node -c` sin errores, respaldo hecho, autorización explícita recibida, **y este archivo actualizado y subido**.
