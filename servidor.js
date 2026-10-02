@@ -77,29 +77,6 @@ setInterval(() => {
 // Los UID de Firebase solo llevan letras, números, guion y guion bajo
 const UID_VALIDO = /^[A-Za-z0-9_-]{10,128}$/;
 
-// ==================== FIREBASE ====================
-
-let db;
-
-try {
-  const serviceAccountB64 = process.env.FIREBASE_SERVICE_ACCOUNT_B64;
-  if (!serviceAccountB64) {
-    throw new Error('La variable de entorno FIREBASE_SERVICE_ACCOUNT_B64 no está definida.');
-  }
-
-  const serviceAccountJson = Buffer.from(serviceAccountB64, 'base64').toString('utf8');
-  const serviceAccount = JSON.parse(serviceAccountJson);
-  
-  admin.initializeApp({
-    credential: admin.credential.cert(serviceAccount),
-    databaseURL: 'https://betgroup-cuba-2024-default-rtdb.firebaseio.com'
-  });
-  
-  console.log('✅ Firebase Admin SDK inicializado');
-
-// Claves de agentes (si no están en variables de entorno)
-
-
 // ==================== NOTIFICACIÓN DE ERRORES A TELEGRAM ====================
 // Las claves se leen de las variables de entorno de Render (nunca escritas en el código)
 const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN || '';
@@ -121,6 +98,28 @@ process.on('unhandledRejection', (reason) => {
   notifyTelegram(`⚠️ BetGroup Proxy PROMESA RECHAZADA: ${reason?.message || reason}`);
 });
 // ==================== FIN NOTIFICACIÓN TELEGRAM ====================
+
+// ==================== FIREBASE ====================
+
+let db;
+
+try {
+  const serviceAccountB64 = process.env.FIREBASE_SERVICE_ACCOUNT_B64;
+  if (!serviceAccountB64) {
+    throw new Error('La variable de entorno FIREBASE_SERVICE_ACCOUNT_B64 no está definida.');
+  }
+
+  const serviceAccountJson = Buffer.from(serviceAccountB64, 'base64').toString('utf8');
+  const serviceAccount = JSON.parse(serviceAccountJson);
+  
+  admin.initializeApp({
+    credential: admin.credential.cert(serviceAccount),
+    databaseURL: 'https://betgroup-cuba-2024-default-rtdb.firebaseio.com'
+  });
+  
+  console.log('✅ Firebase Admin SDK inicializado');
+
+
 
 
   db = admin.database();
