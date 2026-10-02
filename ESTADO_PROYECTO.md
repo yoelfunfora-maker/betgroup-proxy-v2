@@ -197,6 +197,8 @@ Decisión de Yoel: seguir gratis (el sistema aún no da ganancia). Yoel usa 3-4 
 - Emparejamiento más fuerte: con la misma hora (±3 h), un equipo seguro (≥ 0.9) y el otro ≥ 0.4 → mismo partido (p. ej. "Central Córdoba (Santiago del Estero)" / "Central Cordoba SdE").
 - Respaldo legal y gratuito: `lib/apiFootball.js` (API-Football, 100 consultas/día, una cuenta). Solo para fútbol que quedó sin cuota; 1X2 + más/menos; copia 24 h en `cacheCuotasAF/`; si falla, no reintenta en 1 h. Clave en `API_FOOTBALL_KEY` (Render) o `secretos/apiFootball` (guardada con `publicar/clave_api_football.sh` → `POST /api/admin/clave-api-football`, que la prueba con /status).
 - Los IDs de liga y la temporada de API-Football salen de su documentación; verificar con el diagnóstico tras la primera ejecución real.
+- Fallo corregido (caso Genoa-Fiorentina): se usaba solo la 1.ª casa de apuestas; si no tenía 1X2 el partido quedaba sin cuota. Ahora `casaCombinada()` toma cada mercado de la primera casa que lo ofrece. Las copias viejas caducan solas en 12-24 h (no se gastan créditos en refrescarlas antes).
+- Sin cuota y sin arreglo posible: pretemporada NBA (la API solo trae temporada regular), amistosos internacionales (no conectados), peleas de UFC que la API no ofrece.
 - **Decisión de Yoel (2 oct): no usar API-Football por ahora.** El código queda inactivo: sin clave no hace ninguna consulta. Se activa solo si un día se guarda la clave.
 - Pruebas: `test/cuotas2.prueba.js` (14).
 

@@ -26,7 +26,10 @@ const ESPN = {
 };
 const h2h = (l, v, a, x, b) => ({ key: 'h2h', outcomes: [{ name: l, price: a }, { name: 'Draw', price: x }, { name: v, price: b }] });
 const ODDS = {
-  soccer_italy_serie_a: [{ home_team: 'Genoa', away_team: 'Fiorentina', commence_time: iso(en5dias), bookmakers: [{ markets: [h2h('Genoa', 'Fiorentina', 3.1, 3.3, 2.3)] }] }],
+  // Caso real (Genoa-Fiorentina): la PRIMERA casa solo trae más/menos; el 1X2 está en la segunda.
+  soccer_italy_serie_a: [{ home_team: 'Genoa', away_team: 'Fiorentina', commence_time: iso(en5dias), bookmakers: [
+    { key: 'casa1', markets: [{ key: 'totals', outcomes: [{ name: 'Over', point: 2.5, price: 2.1 }, { name: 'Under', point: 2.5, price: 1.7 }] }] },
+    { key: 'casa2', markets: [h2h('Genoa', 'Fiorentina', 3.1, 3.3, 2.3)] }] }],
   soccer_argentina_primera_division: [{ home_team: 'Central Cordoba SdE', away_team: 'Boca Juniors', commence_time: iso(hoy), bookmakers: [{ markets: [h2h('Central Cordoba SdE', 'Boca Juniors', 4.2, 3.1, 1.9)] }] }],
   soccer_norway_eliteserien: [{ home_team: 'Brann', away_team: 'Viking', commence_time: iso(hoy), bookmakers: [{ markets: [h2h('Brann', 'Viking', 2.0, 3.6, 3.4)] }] }],
   soccer_brazil_campeonato: [] // The Odds API no lo tiene → respaldo
@@ -81,6 +84,7 @@ async function partidos() {
     let evs = await partidos();
     const de = (local) => evs.find(e => e.local === local) || {};
     ok(de('Genoa').cuota_local === 3.1, 'partido a 5 días ya tiene cuota (antes: "las cuotas se abren 2 días antes") → ' + de('Genoa').cuota_local);
+    ok(de('Genoa').total_over_price === 2.1, 'Genoa-Fiorentina: 1X2 de la 2.ª casa y más/menos de la 1.ª (antes: sin cuota porque la 1.ª casa no tenía 1X2)');
     ok(de('Central Córdoba (Santiago del Estero)').cuota_local === 4.2, 'nombre muy distinto ("Central Cordoba SdE") emparejado gracias a la hora y al rival → ' + de('Central Córdoba (Santiago del Estero)').cuota_local);
     ok(de('SK Brann').cuota_local === 2.0, 'Noruega: "SK Brann" = "Brann", "Viking FK" = "Viking"');
     ok(pedidas.some(u => u.includes('soccer_norway_eliteserien') && /markets=h2h&/.test(u)) && pedidas.some(u => u.includes('soccer_italy_serie_a') && u.includes('markets=h2h,spreads,totals')),

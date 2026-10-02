@@ -541,6 +541,18 @@ function claveOdds(evento) {
   return (typeof v === 'function' ? v(evento.liga, evento.ruta) : v) || null;
 }
 
+// Junta en una sola "casa" el primer 1X2, el primer hándicap y el primer más/menos que haya.
+function casaCombinada(casas) {
+  const markets = [];
+  for (const clave of ['h2h', 'spreads', 'totals']) {
+    for (const casa of casas) {
+      const m = (casa.markets || []).find(x => x.key === clave && Array.isArray(x.outcomes) && x.outcomes.length);
+      if (m) { markets.push({ key: clave, outcomes: m.outcomes, casa: casa.key || null }); break; }
+    }
+  }
+  return markets.length ? [{ key: 'combinada', markets }] : [];
+}
+
 // Empareja cada partido de ESPN con el más parecido de la lista del proveedor y copia sus cuotas.
 // fuente: 'the-odds-api' o 'api-football' (queda anotada en el partido).
 function asignarCuotas(eventosGrupo, juegos, fuente) {
@@ -668,10 +680,12 @@ async function enriquecerConCuotas(eventos) {
               Object.assign(estadoOddsApi, { restantes, usados: Number(response.headers['x-requests-used']) || null, actualizado: new Date().toISOString() });
             }
             if (response.data) {
-              // Se guarda solo lo que se usa (la primera casa de apuestas) para no llenar Firebase.
+              // Se guarda solo lo que se usa, en una "casa combinada": cada mercado se toma de la
+              // primera casa que lo ofrece. Antes se usaba solo la primera casa, y si esa no tenía
+              // 1X2 (pasa en partidos lejanos) el partido se quedaba sin cuota aunque otras 19 sí.
               juegos = (response.data.data || response.data || []).map(g => ({
                 home_team: g.home_team, away_team: g.away_team, commence_time: g.commence_time,
-                casas: (g.bookmakers || []).length, bookmakers: (g.bookmakers || []).slice(0, 1)
+                casas: (g.bookmakers || []).length, bookmakers: casaCombinada(g.bookmakers || [])
               }));
               oddsCache[sportKey] = { data: juegos, timestamp: Date.now() };
               db.ref(`cacheCuotas/${sportKey}`).set({ data: juegos, timestamp: oddsCache[sportKey].timestamp })
