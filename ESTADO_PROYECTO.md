@@ -140,6 +140,13 @@ Publicada por Yoel con `publicar_todo.sh`: variables en Render (200), servidor e
 - Pruebas: `npm test` (4 archivos) y `test/navegador.e2e.js` (16 comprobaciones).
 - Pendiente conocido: caché de cuotas de The Odds API de 12 h (cuota gratuita limitada); como solo se apuesta antes del partido, es aceptable.
 
+## Etapa 5 — diseño (DESPLEGADA 2 oct 2026, 13:56 hora de Cuba; copia en publico.bak_20261002_135616)
+
+- Capa única `<style id="diseno-v2">` al final del `<head>` de `index.html` (manda sobre los estilos antiguos repetidos). Paleta: fondo #0B0E14, tarjetas #141923, oro #D4AF37 solo en saldo y "Apostar".
+- Letra Inter servida desde `publico/fuentes/` (Google Fonts suele estar bloqueado en Cuba).
+- Cabecera fija con saldo, navegación abajo, tarjeta de partido con escudos originales enfrentados y logo de liga, boleto con monto libre (atajos y validación contra saldo, maxBet y maxPago).
+- Boceto aprobado por Yoel: https://claude.ai/artifact/JMcQKrAHA94WVHSc3Hc9TG
+
 ## Decisiones de Yoel (2 oct 2026)
 
 - **Las claves filtradas NO se rotan** (decisión de Yoel, riesgo aceptado). Se cargan tal cual en las variables de entorno de Render. Siguen visibles en el historial público de git.
