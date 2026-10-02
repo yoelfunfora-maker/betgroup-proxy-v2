@@ -685,8 +685,14 @@ const limiteRegistro = limitador({
   ventanaMs: 60 * 60 * 1000, maximo: 20, soloFallos: true,
   mensaje: 'Demasiados intentos fallidos desde tu conexión. Espera una hora o pide ayuda a quien te invitó.'
 });
+// Tope global de fallos (todas las IPs juntas): aunque alguien falsificara su IP para
+// saltarse el límite anterior, no podría probar más de 300 códigos por hora.
+const limiteRegistroGlobal = limitador({
+  ventanaMs: 60 * 60 * 1000, maximo: 300, soloFallos: true, clave: () => 'registro-global',
+  mensaje: 'El registro está saturado ahora mismo. Prueba dentro de un rato.'
+});
 const limiteRecuperar = limitador({ ventanaMs: 60 * 60 * 1000, maximo: 10, mensaje: 'Demasiadas solicitudes. Prueba en una hora.' });
-app.post('/api/auth/registro', limiteRegistro, operacion((req) => operaciones.registrar(req)));
+app.post('/api/auth/registro', limiteRegistroGlobal, limiteRegistro, operacion((req) => operaciones.registrar(req)));
 app.post('/api/auth/recuperar', limiteRecuperar, operacion((req) => operaciones.solicitarRecuperacion(req)));
 
 // ==================== BASE DE DATOS A TRAVÉS DEL SERVIDOR ====================
