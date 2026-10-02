@@ -235,6 +235,7 @@ Decisiones de Yoel: rangos visibles **Agente** (rol interno `subadmin`) y **Supe
 
 - El agente cobra, además de su % por ganancia, un **3 % FIJO de la inyección neta semanal** de su red: depósitos aprobados (`depositos` approved + `solicitudesDeposito` aprobado) − retiros pedidos no rechazados (`solicitudesRetiro`), en la semana lunes-domingo (Cuba). Solo de jugadores activos (apostaron dinero real). Neta negativa = 0.
 - Solo se paga si la red dejó ganancia esa semana (neto > 0 tras arrastre): "si la casa no gana no hay salario". El supervisor no cobra de la inyección (sigue con su 5 % de la ganancia).
+- Un **supervisor con jugadores propios sigue cobrando por ellos como agente** (% por ganancia + 3 % de inyección) además de su 5 % de equipo (decisión de Yoel). En la tabla del CEO aparece como «(supervisor)».
 - `lib/comisiones.js` (`inyeccionJugador`, `PCT_INYECCION`); campos `depositado`, `retirado`, `inyeccionNeta`, `comisionInyeccion`, `totalAgente`. Paneles del agente y del CEO y desglose de Telegram actualizados. Prueba en `test/comisiones.prueba.js`.
 
 ## Cierre de la sesión del 2 oct 2026 — pendiente para la próxima
