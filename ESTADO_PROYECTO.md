@@ -147,6 +147,19 @@ Publicada por Yoel con `publicar_todo.sh`: variables en Render (200), servidor e
 - Cabecera fija con saldo, navegación abajo, tarjeta de partido con escudos originales enfrentados y logo de liga, boleto con monto libre (atajos y validación contra saldo, maxBet y maxPago).
 - Boceto aprobado por Yoel: https://claude.ai/artifact/JMcQKrAHA94WVHSc3Hc9TG
 
+## Etapa 6 — registro desde Cuba y fotos de MMA (PREPARADA, pendiente de publicar)
+
+Queja: en Cuba costaba mucho registrarse y entrar. Causas encontradas y arreglos:
+- **Límite por IP mal medido:** Render llega a través de Cloudflare; `req.ip` podía ser la IP del nodo de Cloudflare (Miami), compartida por casi toda Cuba. Con 5 registros/hora por IP, al 6.º se bloqueaba a todos. Ahora `ipCliente()` (lib/seguridad.js) usa `CF-Connecting-IP`; registro: 20 intentos **fallidos**/hora por IP (los correctos no cuentan) + tope global de 300 fallos/hora; recuperar con su propio límite (10/h).
+- **Servidor dormido (Render gratis):** tarda hasta 1 min en despertar y la web daba "Failed to fetch". `bg-api.js` ahora lo despierta al abrir la web (`BG.despertar`), avisa en pantalla, tiene tiempo límite de 70 s y mensajes en español. Los POST nunca se reintentan solos (no se gasta el código dos veces).
+- **Formulario confuso:** decía "mín. 6 caracteres" y se exigían 8; mensajes genéricos. Ahora etiquetas visibles, ejemplos (nauta.cu), "Mostrar contraseña", un mensaje por campo, correo/código se limpian solos (mayúsculas y espacios) y al crear la cuenta entra directamente.
+- **Sesión perdida por cortes:** un fallo de red al reabrir la app borraba la sesión; ahora solo se borra con 401.
+- **Carga lenta:** Chart.js y jsPDF con `defer`, Font Awesome sin bloquear; `firebase.json` con `no-cache` en html/js para no servir la web vieja.
+- **Fallo oculto arreglado:** `eliminarUsuario` no estaba guardado en `lib/operaciones.js` (la ruta en producción daba 500).
+- **Fotos MMA:** ESPN ya manda la foto del luchador (`athlete.headshot`, a veces `{href}`); si falta, `https://a.espncdn.com/i/headshots/mma/players/full/<id>.png`. La tarjeta la muestra en círculo; si no carga, iniciales.
+- Nueva ruta `GET /api/version` → `{version:'etapa6'}` (la usa `publicar_web.sh`).
+- Pruebas: `npm test` (5 archivos, + `registro.prueba.js`), `test/navegador.e2e.js` y `test/registro.e2e.js` (9 comprobaciones en navegador con servidor dormido simulado).
+
 ## Decisiones de Yoel (2 oct 2026)
 
 - **Las claves filtradas NO se rotan** (decisión de Yoel, riesgo aceptado). Se cargan tal cual en las variables de entorno de Render. Siguen visibles en el historial público de git.
