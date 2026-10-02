@@ -202,6 +202,16 @@ Decisión de Yoel: seguir gratis (el sistema aún no da ganancia). Yoel usa 3-4 
 - **Decisión de Yoel (2 oct): no usar API-Football por ahora.** El código queda inactivo: sin clave no hace ninguna consulta. Se activa solo si un día se guarda la clave.
 - Pruebas: `test/cuotas2.prueba.js` (14).
 
+## Etapa 10 — app instalable, presentación y antifraude (2 oct 2026)
+
+- **App (PWA):** `manifest.json` completo, iconos en `iconos/` (generados con Chromium desde SVG), `sw.js` (página y bg-api.js: primero Internet, sin conexión la última copia; iconos/fuentes en caché; no toca la API), tarjeta "¿Te avisamos?" (ya no se pide permiso de golpe), avisos de apuesta resuelta, depósito y premio del ranking (en la app siempre; en la barra si hay permiso). Las notificaciones con la app CERRADA necesitarían Web Push (servidores de Google, poco fiables desde Cuba): no se hizo.
+- `service-worker.js` (el "limpiador" antiguo) sigue igual; el nuevo es `sw.js`.
+- **Presentación:** SVG + CSS (~3 KB, ~2,4 s), una vez por sesión, se salta tocando, desactivada con "reducir movimiento".
+- **Antifraude (`lib/antifraude.js`), solo avisa:** señales mismo móvil (40), misma cuenta bancaria (35), mismo teléfono (30), apuestas opuestas entre vinculadas (30), retiro sin apostar lo depositado (25), ráfaga de 3+ altas por móvil en 24 h (20), huella idéntica (10). Niveles 30 revisar / 60 alto (Telegram 1 vez al día). Cada 6 h + botón del CEO. Identificadores cifrados con HMAC (AUDIT_SECRET); nodos `riesgo`, `perfilRiesgo`, `dispositivosUso`, `huellasUso` inaccesibles desde /api/db. País de Cloudflare solo informativo (VPN no suma). Rutas: `POST /api/dispositivo`, `GET /api/admin/riesgo`, `POST /api/admin/riesgo/recalcular`.
+- Calibrar 2-4 semanas antes de pensar en bloquear.
+- Pruebas: `test/antifraude.prueba.js` (17), `test/app.e2e.js` (12 en navegador).
+- Casino: NO construido. Pendiente de decisión de Yoel (ver propuesta en la conversación: juegos propios "provably fair", gratis de construir, mismo riesgo legal que las apuestas).
+
 ## Decisiones de Yoel (2 oct 2026)
 
 - **Las claves filtradas NO se rotan** (decisión de Yoel, riesgo aceptado). Se cargan tal cual en las variables de entorno de Render. Siguen visibles en el historial público de git.

@@ -16,6 +16,7 @@ const { crearMotorApuestas, ErrorApuesta } = require('./lib/apuestas');
 const { crearRanking, semanaPorId, semanaAnterior } = require('./lib/ranking');
 const imagenes = require('./lib/imagenes');
 const { crearApiFootball } = require('./lib/apiFootball');
+const { crearAntifraude } = require('./lib/antifraude');
 const { fusionarCuotasBot } = require('./lib/mercadosBot');
 const { leerMarcador } = require('./lib/mercados');
 const { crearProxyDb } = require('./lib/proxyDb');
@@ -111,6 +112,9 @@ async function claveApiFootball() {
   return v;
 }
 const apiFootball = crearApiFootball({ db, obtenerClave: claveApiFootball });
+
+// Antifraude propio (ver lib/antifraude.js): solo avisa, no bloquea.
+const antifraude = crearAntifraude({ db, secreto: config.auditoriaSecreto, notificarTelegram: (t) => notificarTelegram(t), escaparHtml: (t) => escaparHtml(t) });
 
 // ==================== CACHÉ ====================
 
@@ -822,7 +826,7 @@ app.get('/api/ping', (req, res) => {
 
 // Versión del servidor: el script de publicación espera a que Render tenga esta antes de subir la web.
 app.get('/api/version', (req, res) => {
-  res.json({ version: 'etapa9' });
+  res.json({ version: 'etapa10' });
 });
 
 app.get('/api/health', (req, res) => {
@@ -959,6 +963,22 @@ app.post('/api/admin/clave-api-football', soloCEO, operacion(async (req) => {
   await auditoria.registrarSeguro({ accion: 'clave_api_football_guardada', actor: req.usuario.uid, requestId: req.id, detalles: { plan: info.plan } });
   return { guardada: true, ...info };
 }));
+// ---------- Antifraude ----------
+// El móvil manda su identificador (aleatorio) y su huella técnica al entrar; se guardan cifrados.
+const limiteDispositivo = limitador({ ventanaMs: 60 * 60 * 1000, maximo: 30, clave: porUsuario });
+app.post('/api/dispositivo', requerirSesion, limiteDispositivo, operacion(async (req) => {
+  const pais = typeof req.headers['cf-ipcountry'] === 'string' ? req.headers['cf-ipcountry'].toUpperCase() : null;
+  const ok = await antifraude.registrarDispositivo({ uid: req.usuario.uid, id: req.body?.id, huella: req.body?.huella, pais });
+  if (!ok) throw new ErrorOperacion(400, 'Datos del dispositivo inválidos');
+  return {};
+}));
+app.get('/api/admin/riesgo', soloCEO, operacion(async () => ({ usuarios: await antifraude.listado(), puntos: antifraude.PUNTOS })));
+app.post('/api/admin/riesgo/recalcular', soloCEO, operacion(async (req) => {
+  const r = await antifraude.evaluarTodos();
+  await auditoria.registrarSeguro({ accion: 'riesgo_recalculado', actor: req.usuario.uid, requestId: req.id, detalles: { conRiesgo: Object.keys(r).length } });
+  return { usuarios: await antifraude.listado() };
+}));
+
 // Liquidación automática bajo demanda (el CEO no tiene que esperar los 30 min).
 app.post('/api/admin/liquidar-ahora', soloCEO, operacion(async () => ({ liquidadas: await liquidarApuestasAutomatico() })));
 // Avisos a Telegram desde el navegador: el token ya no viaja al frontend.
@@ -1876,6 +1896,9 @@ function programarReportes() {
   programar2pm();
   programarMonitoreo();
   setInterval(liquidarApuestasAutomatico, 30*60*1000);
+  // Cada 6 horas: antifraude (solo avisa por Telegram si alguien pasa a riesgo alto).
+  setInterval(() => antifraude.evaluarTodos().catch(e => console.error('Antifraude:', e.message)), 6*60*60*1000);
+  setTimeout(() => antifraude.evaluarTodos().catch(e => console.error('Antifraude:', e.message)), 10*60*1000);
   // Cada hora: si ya empezó una semana nueva, avisa al CEO de los ganadores (una sola vez).
   setInterval(() => ranking.avisarSemanaTerminada().catch(e => console.error('Aviso de ranking:', e.message)), 60*60*1000);
   setTimeout(liquidarApuestasAutomatico, 5*60*1000);

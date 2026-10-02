@@ -97,6 +97,10 @@ http.createServer((req, res) => {
     await pagina.fill('#loginPass', 'm1-clave-1');
     await pagina.click('text=Iniciar Sesión');
     await pagina.waitForSelector('#app', { state: 'visible', timeout: 20000 });
+    await pagina.waitForFunction(() => sessionStorage.getItem('bg_disp_enviado') === '1', null, { timeout: 15000 });
+    const usos = get('dispositivosUso') || {};
+    ok(Object.values(usos).some(g => g && g.BG_m1) && !JSON.stringify(usos).includes(await pagina.evaluate(() => localStorage.getItem('bg_disp'))),
+      'antifraude: el móvil envía su identificador al entrar y el servidor lo guarda cifrado');
     await pagina.waitForSelector('#bgInvitarAvisos', { timeout: 15000 });
     await pagina.waitForTimeout(3500); // que se vaya el "Bienvenido" para la captura
     ok(true, 'tras entrar aparece "¿Te avisamos?" (explica para qué antes de pedir permiso)');
