@@ -120,6 +120,7 @@ Contrato nuevo de `/api/apostar`: `{eventoId, tipo: Local|Visitante|Empate, amou
 - Pruebas: `npm test` (49 + 52 de permisos) y `test/navegador.e2e.js` (Playwright, 13 comprobaciones en Chromium real).
 
 ### Orden de publicación (scripts en `betgroup-frontend/publicar/`)
+`publicar_todo.sh` hace los 4 pasos seguidos y se detiene si uno falla. Por separado:
 1. `1_configurar_render.sh` — variables de entorno en Render (las claves mantenidas se extraen del código antiguo público).
 2. Fusionar la rama de este repo en `main` → Render despliega el servidor.
 3. `2_publicar_web.sh` — web nueva (con copia de seguridad de `publico`).
