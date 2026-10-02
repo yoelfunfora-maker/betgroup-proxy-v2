@@ -3,57 +3,48 @@ const cors = require('cors');
 const https = require('https');
 const admin = require('firebase-admin');
 const axios = require('axios');
+const config = require('./lib/config');
 
 const app = express();
-const PORT = process.env.PORT || 3000;
+const PORT = config.puerto;
 
 app.use(cors());
 app.use(express.json());
+
+// ==================== NOTIFICACIÓN DE ERRORES A TELEGRAM ====================
+// El token y el chat salen de variables de entorno. Si faltan, no se envía nada.
+
+function notifyTelegram(texto) {
+  if (!config.telegram.token || !config.telegram.chatId) return;
+  const url = `https://api.telegram.org/bot${config.telegram.token}/sendMessage`;
+  https.get(`${url}?chat_id=${encodeURIComponent(config.telegram.chatId)}&text=${encodeURIComponent(texto)}`).on('error', () => {});
+}
+
+process.on('uncaughtException', (err) => {
+  console.error('❌ Error no capturado:', err);
+  notifyTelegram('🚨 BetGroup Proxy: error no capturado. Revisar logs de Render.');
+});
+
+process.on('unhandledRejection', (reason) => {
+  console.error('❌ Promesa rechazada:', reason);
+  notifyTelegram('⚠️ BetGroup Proxy: promesa rechazada. Revisar logs de Render.');
+});
+// ==================== FIN NOTIFICACIÓN TELEGRAM ====================
 
 // ==================== FIREBASE ====================
 
 let db;
 
 try {
-  const serviceAccountB64 = process.env.FIREBASE_SERVICE_ACCOUNT_B64;
-  if (!serviceAccountB64) {
-    throw new Error('La variable de entorno FIREBASE_SERVICE_ACCOUNT_B64 no está definida.');
-  }
-
-  const serviceAccountJson = Buffer.from(serviceAccountB64, 'base64').toString('utf8');
+  const serviceAccountJson = Buffer.from(config.firebase.serviceAccountB64, 'base64').toString('utf8');
   const serviceAccount = JSON.parse(serviceAccountJson);
-  
+
   admin.initializeApp({
     credential: admin.credential.cert(serviceAccount),
-    databaseURL: 'https://betgroup-cuba-2024-default-rtdb.firebaseio.com'
+    databaseURL: config.firebase.databaseURL
   });
-  
+
   console.log('✅ Firebase Admin SDK inicializado');
-
-// Claves de agentes (si no están en variables de entorno)
-
-
-// ==================== NOTIFICACIÓN DE ERRORES A TELEGRAM ====================
-const TELEGRAM_BOT_TOKEN = '8671464180:AAHhu_Ct9-3Q6Arjle-7Xy4DyUGuuNvraBs';
-const TELEGRAM_CHAT_ID = '-5154764705';
-
-function notifyTelegram(texto) {
-  const url = `https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage`;
-  require('https').get(`${url}?chat_id=${TELEGRAM_CHAT_ID}&text=${encodeURIComponent(texto)}`).on('error', () => {});
-}
-
-process.on('uncaughtException', (err) => {
-  console.error('❌ Error no capturado:', err.message);
-  notifyTelegram(`🚨 BetGroup Proxy ERROR: ${err.message}\n\nStack: ${err.stack?.substring(0, 300) || 'sin stack'}`);
-});
-
-process.on('unhandledRejection', (reason) => {
-  console.error('❌ Promesa rechazada:', reason);
-  notifyTelegram(`⚠️ BetGroup Proxy PROMESA RECHAZADA: ${reason?.message || reason}`);
-});
-// ==================== FIN NOTIFICACIÓN TELEGRAM ====================
-
-
   db = admin.database();
 } catch(error) {
   console.error('Error al inicializar Firebase Admin SDK:', error.message);
@@ -76,18 +67,13 @@ function setCache(key, data) {
 }
 
 // ==================== API KEYS ====================
-
-const ODDS_API_KEY_1 = process.env.ODDS_API_KEY_1 || '';
-const ODDS_API_KEY_2 = process.env.ODDS_API_KEY_2 || '';
+// ODDS_API_KEYS = "clave1,clave2,clave3" en Render. Se reparten por franja horaria.
 
 function getApiKey() {
-  const hour = new Date().getHours();
-  // KEY1: horas 0-7 (medianoche a 8am)
-  if (hour < 8)  return 'c56f6c464ebd4fb634c495a2c2488610';
-  // KEY2: horas 8-15 (8am a 4pm)
-  if (hour < 16) return 'e18abd8956512f34027f0ac3f87fbe52';
-  // KEY3: horas 16-23 (4pm a medianoche)
-  return '0e31c3149f0afbb009491a0cd80169f4';
+  const claves = config.oddsApiKeys;
+  if (claves.length === 0) return '';
+  const franja = Math.floor(new Date().getHours() / (24 / claves.length));
+  return claves[Math.min(franja, claves.length - 1)];
 }
 
 // ==================== ESPN FETCH ====================
@@ -408,11 +394,7 @@ async function enriquecerConCuotas(eventos) {
         // MMA solo tiene h2h, los demás tienen spreads y totals también
         const mkts = sportKey === 'mma_mixed_martial_arts' ? 'h2h' : 'h2h,spreads,totals';
         // Intentar con múltiples claves si la primera falla (ej. 401 para MMA)
-        const apiKeys = [
-          'c56f6c464ebd4fb634c495a2c2488610',
-          'e18abd8956512f34027f0ac3f87fbe52',
-          '0e31c3149f0afbb009491a0cd80169f4'
-        ];
+        const apiKeys = config.oddsApiKeys;
         let success = false;
         for (const key of apiKeys) {
           try {
@@ -425,7 +407,7 @@ async function enriquecerConCuotas(eventos) {
               break;
             }
           } catch(innerErr) {
-            console.warn(`  Clave falló: ${key.slice(0,10)}... (${innerErr.message})`);
+            console.warn(`  Una clave de The Odds API falló (${innerErr.response?.status || innerErr.code || 'error'})`);
             continue;
           }
         }
@@ -769,10 +751,8 @@ app.post('/api/huggingface/cuotas', async (req, res) => {
 
 
 app.get('/api/agents-status', async (req, res) => {
-  const GEMINI_B64 = 'QVEuQWI4Uk42SVNDbFk0WnNqSXRpZlNCaXZkeUppblBjMUdoNEljMUJGM2Nxc3RBVjRsa2c=';
-  const GROQ_B64 = 'Z3NrX05rU01oNlBxdm9qdElnNTlrT1QyV0dkeWIzRlkwc3dDYVZHYzRGa055ZFV6OGZYcjl0SXc=';
-  const geminiKey = Buffer.from(GEMINI_B64, 'base64').toString();
-  const groqKey   = Buffer.from(GROQ_B64, 'base64').toString();
+  const geminiKey = config.geminiKey;
+  const groqKey   = config.groqKey;
   const status = { Geminis02: 'unknown', Agente_groc01: 'unknown', Athos_Tavily: 'unknown' };
 
   if (geminiKey) {
@@ -797,7 +777,7 @@ app.get('/api/agents-status', async (req, res) => {
     } catch(e) { status.Agente_groc01 = 'error: ' + e.message; }
   } else { status.Agente_groc01 = 'no_key'; }
 
-  const tavilyKey = process.env.TAVILY_API_KEY;
+  const tavilyKey = config.tavilyKey;
   status.Athos_Tavily = tavilyKey ? 'configured' : 'no_key';
   res.json({ success: true, agents: status, timestamp: new Date().toISOString() });
 });
@@ -810,8 +790,7 @@ app.post('/api/chat', async (req, res) => {
   if (!mensaje || typeof mensaje !== 'string' || mensaje.trim().length === 0) {
     return res.status(400).json({ error: 'Mensaje vacío o inválido' });
   }
-  const GROQ_B64 = 'Z3NrX05rU01oNlBxdm9qdElnNTlrT1QyV0dkeWIzRlkwc3dDYVZHYzRGa055ZFV6OGZYcjl0SXc=';
-  const groqKey = Buffer.from(GROQ_B64, 'base64').toString();
+  const groqKey = config.groqKey;
   if (!groqKey) return res.status(500).json({ error: 'Agente no configurado' });
 
   // Obtener eventos reales desde la caché del sistema
@@ -917,9 +896,10 @@ async function obtenerEstadoSistema() {
 }
 
 async function notificarTelegram(texto) {
+  if (!config.telegram.token || !config.telegram.chatId) return;
   try {
-    await axios.post('https://api.telegram.org/bot8671464180:AAHhu_Ct9-3Q6Arjle-7Xy4DyUGuuNvraBs/sendMessage', {
-      chat_id: '-5154764705',
+    await axios.post(`https://api.telegram.org/bot${config.telegram.token}/sendMessage`, {
+      chat_id: config.telegram.chatId,
       text: texto,
       parse_mode: 'HTML'
     }, { timeout: 5000 });
@@ -945,7 +925,7 @@ app.get('/api/verificacion-geminis', async (req, res) => {
     if (saldoEP.status === 'fulfilled') estado.saldo_endpoint = saldoEP.value.data?.creditoReal;
 
     // Formato exacto del curl funcional
-    const geminiKey = 'AQ.Ab8RN6ISClY4ZsjItifSBivdyJinPc1Gh4Ic1BF3cqstAV4lkg';
+    const geminiKey = config.geminiKey;
     let informe = 'Sistema operativo. Saldo Firebase: ' + estado.saldo_firebase + ' | Saldo endpoint: ' + estado.saldo_endpoint;
     
     try {
@@ -959,11 +939,7 @@ app.get('/api/verificacion-geminis', async (req, res) => {
       }
     } catch(e) { console.log('Gemini no disponible para el informe, usando resumen básico'); }
 
-    await axios.post('https://api.telegram.org/bot8671464180:AAHhu_Ct9-3Q6Arjle-7Xy4DyUGuuNvraBs/sendMessage', {
-      chat_id: '-5154764705',
-      text: '📊 <b>INFORME DE GEMINIS02</b>\n\n' + informe,
-      parse_mode: 'HTML'
-    }, { timeout: 5000 });
+    await notificarTelegram('📊 <b>INFORME DE GEMINIS02</b>\n\n' + informe);
 
     res.json({ success: true, estado, informe });
   } catch(e) { res.status(500).json({ error: e.message }); }
@@ -1143,8 +1119,8 @@ const HF_TOKEN = process.env.HF_TOKEN || '';
 
 // Helper Cloudflare AI
 async function callCF(messages, modelo) {
-  const acc = process.env.CF_ACCOUNT_ID || '';
-  const tok = process.env.CF_TOKEN || '';
+  const acc = config.cloudflare.accountId;
+  const tok = config.cloudflare.token;
   const modelos = {
     rapido: '@cf/qwen/qwen2.5-7b-instruct',
     potente: '@cf/meta/llama-3.3-70b-instruct-fp8-fast',
@@ -1316,8 +1292,8 @@ async function enviarReporteTelegram() {
       resumen += ev.local + ' vs ' + ev.visitante + ': Local@' + ev.cuota_local + ' Visitante@' + ev.cuota_visitante + NL;
     }
     const prompt = 'Analista deportivo cubano. Eventos de hoy:' + NL + resumen + NL + 'Genera mensaje Telegram: mejor cuota, combinacion recomendada, curiosidad. Emojis, cubano. Max 150 palabras.';
-    const CF_ACCOUNT_ID2 = process.env.CF_ACCOUNT_ID || '';
-    const CF_TOKEN2 = process.env.CF_TOKEN || '';
+    const CF_ACCOUNT_ID2 = config.cloudflare.accountId;
+    const CF_TOKEN2 = config.cloudflare.token;
     const hfResp = await fetch('https://api.cloudflare.com/client/v4/accounts/' + CF_ACCOUNT_ID2 + '/ai/run/@cf/meta/llama-3.3-70b-instruct-fp8-fast', {
       method: 'POST',
       headers: { 'Authorization': 'Bearer ' + CF_TOKEN2, 'Content-Type': 'application/json' },
@@ -1520,8 +1496,8 @@ app.get('/api/debug-reporte', async (req, res) => {
       cache_total: cacheEvs,
       cache_con_cuotas: cacheConCuotas,
       espn_mlb_directo: espnEvs,
-      cf_account: process.env.CF_ACCOUNT_ID ? 'OK' : 'FALTA',
-      cf_token: process.env.CF_TOKEN ? 'OK' : 'FALTA'
+      cf_account: config.cloudflare.accountId ? 'OK' : 'FALTA',
+      cf_token: config.cloudflare.token ? 'OK' : 'FALTA'
     });
   } catch(e) {
     res.json({ error: e.message });
