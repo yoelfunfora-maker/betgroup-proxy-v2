@@ -8,6 +8,7 @@ const {
   responderError, manejadorErrores, rutaNoEncontrada
 } = require('./lib/seguridad');
 const { crearAuditoria } = require('./lib/auditoria');
+const { crearAutenticacion, NIVEL } = require('./lib/autenticacion');
 
 const app = express();
 const PORT = config.puerto;
@@ -64,6 +65,9 @@ try {
 
 // Registro de auditoría encadenado y firmado (ver lib/auditoria.js).
 const auditoria = crearAuditoria(db, config.auditoriaSecreto);
+// Sesiones firmadas por el servidor (ver lib/autenticacion.js).
+const auth = crearAutenticacion({ db, config, auditoria });
+const { requerirSesion, requerirNivel } = auth;
 
 // ==================== CACHÉ ====================
 
@@ -639,6 +643,16 @@ app.get('/api/health', (req, res) => {
     timestamp: new Date().toISOString() 
   });
 });
+
+// ==================== AUTENTICACIÓN ====================
+// Login: 10 intentos por IP cada 15 minutos (además del bloqueo por cuenta).
+const limiteLogin = limitador({
+  ventanaMs: 15 * 60 * 1000, maximo: 10,
+  mensaje: 'Demasiados intentos de acceso. Prueba en 15 minutos.'
+});
+app.post('/api/auth/login', limiteLogin, auth.login);
+app.post('/api/auth/logout', requerirSesion, auth.logout);
+app.get('/api/auth/yo', requerirSesion, auth.yo);
 
 app.get('/api/fixtures', async (req, res) => {
   try {
