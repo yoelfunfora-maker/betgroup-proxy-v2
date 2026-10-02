@@ -10,7 +10,8 @@ const {
   responderError, manejadorErrores, rutaNoEncontrada
 } = require('./lib/seguridad');
 const { crearAuditoria } = require('./lib/auditoria');
-const { crearAutenticacion, NIVEL } = require('./lib/autenticacion');
+const { crearVerificadorGoogle, comprobarTurnstile, esCorreoDeGoogle, ErrorAcceso } = require('./lib/accesoExterno');
+const { crearAutenticacion, NIVEL, normalizarClave } = require('./lib/autenticacion');
 const validar = require('./lib/validacion');
 const { crearMotorApuestas, ErrorApuesta } = require('./lib/apuestas');
 const { crearRanking, semanaDe, semanaPorId, semanaAnterior } = require('./lib/ranking');
@@ -1036,7 +1037,73 @@ const limiteRegistroGlobal = limitador({
   mensaje: 'El registro está saturado ahora mismo. Prueba dentro de un rato.'
 });
 const limiteRecuperar = limitador({ ventanaMs: 60 * 60 * 1000, maximo: 10, mensaje: 'Demasiadas solicitudes. Prueba en una hora.' });
-app.post('/api/auth/registro', limiteRegistroGlobal, limiteRegistro, operacion((req) => operaciones.registrar(req)));
+// ==================== GOOGLE Y CLOUDFLARE TURNSTILE (lib/accesoExterno.js) ====================
+// Apagados hasta que existan GOOGLE_CLIENT_ID / TURNSTILE_SITE_KEY + TURNSTILE_SECRET en Render.
+const verificadorGoogle = crearVerificadorGoogle({ clientId: config.googleClientId });
+// La web pregunta qué opciones mostrar (solo datos públicos).
+app.get('/api/auth/opciones', (req, res) => {
+  res.json({ google: config.googleClientId || null, turnstile: config.turnstile.sitio && config.turnstile.secreto ? config.turnstile.sitio : null });
+});
+
+// Casilla "No soy un robot" en el registro. Si Cloudflare dice que NO, se rechaza. Si la casilla no
+// pudo cargar (conexión lenta en Cuba), se deja pasar (el código de invitación sigue siendo
+// obligatorio) salvo que el CEO ponga config/turnstileObligatorio = true; queda en la auditoría.
+async function revisarTurnstile(req, res, next) {
+  try {
+    if (!config.turnstile.secreto || !config.turnstile.sitio) return next();
+    const r = await comprobarTurnstile({ secreto: config.turnstile.secreto, token: req.body?.turnstile, ip: ipCliente(req) });
+    if (r === false) return res.status(400).json({ error: 'No pudimos comprobar que eres una persona. Recarga la página e inténtalo de nuevo' });
+    if (r === null) {
+      const obligatorio = (await db.ref('config/turnstileObligatorio').once('value')).val() === true;
+      if (obligatorio) return res.status(400).json({ error: 'Completa la verificación "No soy un robot" antes de crear la cuenta' });
+      req.sinTurnstile = true;
+    }
+    return next();
+  } catch (e) { return next(e); }
+}
+app.post('/api/auth/registro', limiteRegistroGlobal, limiteRegistro, revisarTurnstile, operacion(async (req) => {
+  const r = await operaciones.registrar(req);
+  if (req.sinTurnstile) await auditoria.registrarSeguro({ accion: 'registro_sin_turnstile', actor: r.uid, requestId: req.id });
+  return r;
+}));
+
+// Entrar o registrarse con Google. El navegador manda el ID token de Google (credential).
+//  - Cuenta ya vinculada → entra.
+//  - Correo @gmail.com que ya tiene cuenta → se vincula y entra (Google es dueño de ese buzón).
+//  - Persona nueva → responde registroPendiente; la web pide apodo, teléfono y código de
+//    invitación y vuelve a llamar. El bono y todas las reglas del registro normal se aplican igual.
+app.post('/api/auth/google', limiteRegistroGlobal, limiteRegistro, async (req, res) => {
+  try {
+    const g = await verificadorGoogle.verificar(req.body?.credential);
+    const vinculo = (await db.ref(`googleCuentas/${g.sub}`).once('value')).val();
+    let uid = vinculo && vinculo.uid;
+    if (!uid) {
+      const cred = (await db.ref(`credenciales_acceso/${normalizarClave(g.email)}`).once('value')).val();
+      if (cred && cred.uid) {
+        if (!esCorreoDeGoogle(g.email)) {
+          return res.status(409).json({ error: 'Ya existe una cuenta con ese correo. Entra con tu contraseña' });
+        }
+        uid = cred.uid;
+        await db.ref().update({ [`googleCuentas/${g.sub}`]: { uid, vinculadaEn: Date.now() }, [`users/${uid}/googleSub`]: g.sub });
+        await auditoria.registrarSeguro({ accion: 'cuenta_google_vinculada', actor: uid, requestId: req.id });
+      }
+    }
+    if (!uid) {
+      if (!req.body?.codigo) return res.json({ registroPendiente: true, nombre: g.nombre, email: g.email });
+      // El nombre viene de Google y la persona no lo escribe aquí: se limpia en vez de rechazarlo.
+      const nombreGoogle = String(g.nombre || '').replace(/[<>\u0000-\u001F\u007F]/g, '').replace(/\s+/g, ' ').trim();
+      const alta = await operaciones.registrar({ ...req, body: { ...req.body, nombre: nombreGoogle || String(req.body?.apodo || '') } }, { ...g, nombre: nombreGoogle });
+      uid = alta.uid;
+    }
+    const usuario = (await db.ref(`users/${uid}`).once('value')).val();
+    if (!usuario || usuario.activo === false) return res.status(403).json({ error: 'Esta cuenta está desactivada' });
+    await auditoria.registrarSeguro({ accion: 'login_google_ok', actor: uid, requestId: req.id });
+    return res.json(auth.emitirSesion(uid, usuario));
+  } catch (err) {
+    if (err instanceof ErrorAcceso || err instanceof ErrorOperacion) return res.status(err.estado).json({ error: err.message });
+    return responderError(res, req, err, req.path);
+  }
+});
 app.post('/api/auth/recuperar', limiteRecuperar, operacion((req) => operaciones.solicitarRecuperacion(req)));
 
 // ==================== BASE DE DATOS A TRAVÉS DEL SERVIDOR ====================
