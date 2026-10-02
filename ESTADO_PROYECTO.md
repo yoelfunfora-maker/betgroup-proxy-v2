@@ -231,6 +231,12 @@ Decisiones de Yoel: rangos visibles **Agente** (rol interno `subadmin`) y **Supe
 - **Jugador activo** (para el escalón de comisión del agente) = hizo al menos una apuesta con dinero REAL liquidada en la semana. Las apuestas con bono/promo no cuentan (evita subir de escalón con cuentas falsas que solo juegan el bono). Decisión de Yoel, 2 oct 2026.
 - Pruebas: `test/bono.prueba.js` (13), `test/registro.e2e.js` ampliado; `navegador.e2e.js` corregido al mínimo de 500. Versión del servidor: `etapa12`.
 
+## Pago por inyección (2 oct 2026, decisión de Yoel)
+
+- El agente cobra, además de su % por ganancia, un **3 % FIJO de la inyección neta semanal** de su red: depósitos aprobados (`depositos` approved + `solicitudesDeposito` aprobado) − retiros pedidos no rechazados (`solicitudesRetiro`), en la semana lunes-domingo (Cuba). Solo de jugadores activos (apostaron dinero real). Neta negativa = 0.
+- Solo se paga si la red dejó ganancia esa semana (neto > 0 tras arrastre): "si la casa no gana no hay salario". El supervisor no cobra de la inyección (sigue con su 5 % de la ganancia).
+- `lib/comisiones.js` (`inyeccionJugador`, `PCT_INYECCION`); campos `depositado`, `retirado`, `inyeccionNeta`, `comisionInyeccion`, `totalAgente`. Paneles del agente y del CEO y desglose de Telegram actualizados. Prueba en `test/comisiones.prueba.js`.
+
 ## Cierre de la sesión del 2 oct 2026 — pendiente para la próxima
 
 1. **Publicar la web de las Etapas 10, 11 y 12** (el servidor estará en `etapa12`): `git -C ~/bg-frontend-privado fetch -q origin claude/upbeat-cerf-rpytdm && git -C ~/bg-frontend-privado checkout -q -B etapa3 origin/claude/upbeat-cerf-rpytdm && bash ~/bg-frontend-privado/publicar/publicar_web.sh` (copia también sw.js, manifest.json e iconos/).
