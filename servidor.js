@@ -1,15 +1,25 @@
 const express = require('express');
-const cors = require('cors');
 const https = require('https');
 const admin = require('firebase-admin');
 const axios = require('axios');
 const config = require('./lib/config');
+const {
+  corsRestringido, cabecerasSeguras, idPeticion, limitador,
+  responderError, manejadorErrores, rutaNoEncontrada
+} = require('./lib/seguridad');
 
 const app = express();
 const PORT = config.puerto;
 
-app.use(cors());
-app.use(express.json());
+// Render pone un proxy delante: así req.ip es la IP real del visitante.
+app.set('trust proxy', 1);
+app.disable('x-powered-by');
+app.use(idPeticion);
+app.use(cabecerasSeguras);
+app.use(corsRestringido(config.origenesPermitidos));
+app.use(express.json({ limit: '32kb', strict: true }));
+// Límite general: 120 peticiones por minuto por IP.
+app.use(limitador({ ventanaMs: 60 * 1000, maximo: 120 }));
 
 // ==================== NOTIFICACIÓN DE ERRORES A TELEGRAM ====================
 // El token y el chat salen de variables de entorno. Si faltan, no se envía nada.
@@ -645,8 +655,8 @@ app.get('/api/fixtures', async (req, res) => {
 
     await precalentarCache();
   } catch(err) {
-    console.error('Error /api/fixtures:', err);
-    res.status(500).json({ error: err.message });
+    if (!res.headersSent) responderError(res, req, err, '/api/fixtures');
+    else console.error(`[${req.id}] /api/fixtures:`, err);
   }
 });
 
@@ -680,8 +690,7 @@ app.post('/api/apostar', async (req, res) => {
     });
     res.json({ success: true, saldoNuevo, betId });
   } catch(err) {
-    console.error('Error /api/apostar:', err);
-    res.status(500).json({ error: err.message });
+    responderError(res, req, err, '/api/apostar');
   }
 });
 
@@ -711,8 +720,7 @@ app.get('/api/saldo/:uid', async (req, res) => {
       timestamp: new Date().toISOString()
     });
   } catch (err) {
-    console.error('Error /api/saldo:', err.message);
-    res.status(500).json({ error: err.message });
+    responderError(res, req, err, '/api/saldo');
   }
 });
 
@@ -763,7 +771,7 @@ app.get('/api/agents-status', async (req, res) => {
         { headers: { 'X-goog-api-key': geminiKey, 'Content-Type': 'application/json' }, timeout: 8000 }
       );
       status.Geminis02 = resp.data?.candidates ? 'online' : 'error';
-    } catch(e) { status.Geminis02 = 'error: ' + e.message; }
+    } catch(e) { status.Geminis02 = 'error'; console.error('agents-status Gemini:', e.message); }
   } else { status.Geminis02 = 'no_key'; }
 
   if (groqKey) {
@@ -774,7 +782,7 @@ app.get('/api/agents-status', async (req, res) => {
         { headers: { Authorization: 'Bearer ' + groqKey, 'Content-Type': 'application/json' }, timeout: 8000 }
       );
       status.Agente_groc01 = resp.data?.choices ? 'online' : 'error';
-    } catch(e) { status.Agente_groc01 = 'error: ' + e.message; }
+    } catch(e) { status.Agente_groc01 = 'error'; console.error('agents-status Groq:', e.message); }
   } else { status.Agente_groc01 = 'no_key'; }
 
   const tavilyKey = config.tavilyKey;
@@ -867,7 +875,7 @@ async function obtenerEstadoSistema() {
   try {
     const agents = await axios.get('https://betgroup-proxy-v2.onrender.com/api/agents-status', { timeout: 5000 });
     estado.agentes = agents.data?.agents || {};
-  } catch(e) { estado.agentes = { error: e.message }; }
+  } catch(e) { estado.agentes = { error: 'no disponible' }; }
 
   try {
     const fixtures = await axios.get('https://betgroup-proxy-v2.onrender.com/api/fixtures', { timeout: 5000 });
@@ -942,7 +950,7 @@ app.get('/api/verificacion-geminis', async (req, res) => {
     await notificarTelegram('📊 <b>INFORME DE GEMINIS02</b>\n\n' + informe);
 
     res.json({ success: true, estado, informe });
-  } catch(e) { res.status(500).json({ error: e.message }); }
+  } catch(e) { responderError(res, req, e, '/api/verificacion-geminis'); }
 });
 
 
@@ -1017,7 +1025,7 @@ app.post('/api/apuestas/liquidar', async (req, res) => {
     }
     res.json({ success: true, liquidadas, message: `${liquidadas} apuestas liquidadas.` });
   } catch (error) {
-    res.status(500).json({ error: error.message });
+    responderError(res, req, error, '/api/apuestas/liquidar');
   }
 });
 // ==================== FIN LIQUIDACIÓN ====================
@@ -1045,7 +1053,7 @@ app.post('/api/admin/reiniciar', async (req, res) => {
     });
     res.status(200).json({ success: true, message: 'Sistema reiniciado. Auditoría e historial limpios.' });
   } catch (error) {
-    res.status(500).json({ success: false, error: error.message });
+    responderError(res, req, error, '/api/admin/reiniciar');
   }
 });
 // ==================== FIN REINICIO ====================
@@ -1064,7 +1072,7 @@ app.get('/api/usuarios/mis-referidos', async (req, res) => {
     const referidos = snapshot.val() ? Object.values(snapshot.val()) : [];
     res.json(referidos);
   } catch (error) {
-    res.status(500).json({ error: error.message });
+    responderError(res, req, error, '/api/usuarios/mis-referidos');
   }
 });
 // ==================== FIN REFERIDOS ====================
@@ -1232,8 +1240,7 @@ app.post('/api/enriquecer', async (req, res) => {
     const enriquecidos = await enriquecerConCuotas(eventos);
     res.json({ status: 'success', total: enriquecidos.length, data: enriquecidos });
   } catch(err) {
-    console.error('Error /api/enriquecer:', err.message);
-    res.status(500).json({ error: err.message });
+    responderError(res, req, err, '/api/enriquecer');
   }
 });
 
@@ -1454,19 +1461,19 @@ app.get('/api/estado-sistema', async (req, res) => {
   try {
     const fbSnap = await db.ref('.info/connected').once('value');
     estado.firebase = fbSnap.val() === true ? 'online' : 'offline';
-  } catch(e) { estado.firebase = 'error: ' + e.message; }
+  } catch(e) { estado.firebase = 'error'; console.error('estado-sistema firebase:', e.message); }
   try {
     const oddsRes = await axios.get('https://api.the-odds-api.com/v4/sports/baseball_mlb/odds?apiKey=' + getApiKey() + '&markets=h2h&regions=us', {timeout: 5000});
     estado.odds_api = oddsRes.data && oddsRes.data.length > 0 ? 'online' : 'sin_datos';
-  } catch(e) { estado.odds_api = 'error: ' + e.message; }
+  } catch(e) { estado.odds_api = 'error'; console.error('estado-sistema odds_api:', e.message); }
   try {
     const espnRes = await axios.get('https://site.api.espn.com/apis/site/v2/sports/baseball/mlb/scoreboard', {timeout: 5000});
     estado.espn = espnRes.data && espnRes.data.events ? 'online' : 'sin_datos';
-  } catch(e) { estado.espn = 'error: ' + e.message; }
+  } catch(e) { estado.espn = 'error'; console.error('estado-sistema espn:', e.message); }
   try {
     await callCF([{role: 'user', content: 'OK'}], 'rapido');
     estado.huggingface = 'online (cloudflare)';
-  } catch(e) { estado.huggingface = 'error: ' + e.message; }
+  } catch(e) { estado.huggingface = 'error'; console.error('estado-sistema huggingface:', e.message); }
   res.json({ success: true, estado });
 });
 
@@ -1476,7 +1483,7 @@ app.post('/api/test-reporte', async (req, res) => {
     await enviarReporteTelegram();
     res.json({ success: true, message: 'Reporte enviado a Telegram.' });
   } catch(e) {
-    res.json({ success: false, error: e.message });
+    responderError(res, req, e, '/api/test-reporte');
   }
 });
 
@@ -1500,9 +1507,12 @@ app.get('/api/debug-reporte', async (req, res) => {
       cf_token: config.cloudflare.token ? 'OK' : 'FALTA'
     });
   } catch(e) {
-    res.json({ error: e.message });
+    responderError(res, req, e, '/api/debug-reporte');
   }
 });
+
+app.use(rutaNoEncontrada);
+app.use(manejadorErrores);
 
 app.listen(PORT, () => {
   console.log(`✅ Proxy escuchando en puerto ${PORT}`);
