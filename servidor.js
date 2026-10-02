@@ -13,6 +13,8 @@ const { crearAuditoria } = require('./lib/auditoria');
 const { crearAutenticacion, NIVEL } = require('./lib/autenticacion');
 const validar = require('./lib/validacion');
 const { crearMotorApuestas, ErrorApuesta } = require('./lib/apuestas');
+const { crearRanking, semanaPorId, semanaAnterior } = require('./lib/ranking');
+const imagenes = require('./lib/imagenes');
 const { fusionarCuotasBot } = require('./lib/mercadosBot');
 const { leerMarcador } = require('./lib/mercados');
 const { crearProxyDb } = require('./lib/proxyDb');
@@ -92,6 +94,9 @@ const operaciones = crearOperaciones({
   notificarTelegram: (t) => notificarTelegram(t),
   escaparHtml: (t) => escaparHtml(t)
 });
+
+// Ranking semanal (ver lib/ranking.js).
+const ranking = crearRanking({ db, auditoria, notificarTelegram: (t) => notificarTelegram(t), escaparHtml: (t) => escaparHtml(t) });
 
 // ==================== CACHÉ ====================
 
@@ -427,6 +432,9 @@ function regionDeCuotas(sportKey) {
   return sportKey.startsWith('soccer_') && !LIGAS_CON_CASAS_US.has(sportKey) ? 'eu' : 'us';
 }
 
+// Solo se gastan créditos en ligas con partidos en este plazo.
+const HORIZONTE_CUOTAS_MS = 48 * 60 * 60 * 1000;
+
 // Último dato de créditos que quedan en The Odds API (para el diagnóstico del CEO).
 const estadoOddsApi = { restantes: null, usados: null, actualizado: null, ultimoError: null };
 
@@ -492,12 +500,32 @@ async function enriquecerConCuotas(eventos) {
 
   // Procesar cada grupo
   for (const [sportKey, eventosGrupo] of Object.entries(grupos)) {
+    // Ahorro de créditos 1: solo se piden cuotas de ligas con algún partido en las próximas 48 h.
+    const ahora = Date.now();
+    const hayProximo = eventosGrupo.some(e => {
+      const t = Date.parse(e.horaInicio || '');
+      return !Number.isFinite(t) || (t > ahora - 3 * 3600000 && t < ahora + HORIZONTE_CUOTAS_MS);
+    });
+    if (!hayProximo && !oddsCache[sportKey]) continue;
+
+    // Ahorro de créditos 2: Render gratis se duerme y al despertar olvida la memoria; antes
+    // eso volvía a gastar créditos en TODAS las ligas. Ahora se recupera la copia de Firebase.
+    if (!oddsCache[sportKey]) {
+      try {
+        const guardada = (await db.ref(`cacheCuotas/${sportKey}`).once('value')).val();
+        if (guardada && Array.isArray(guardada.data) && Number(guardada.timestamp) > 0) {
+          oddsCache[sportKey] = { data: guardada.data, timestamp: Number(guardada.timestamp) };
+        }
+      } catch (e) { console.warn(`No se pudo leer la copia de cuotas de ${sportKey}:`, e.message); }
+    }
     const cacheEntry = oddsCache[sportKey];
     let juegos = null;
 
     // Usar caché si es válido (menos de 12h)
     if (cacheEntry && (Date.now() - cacheEntry.timestamp) < 12 * 60 * 60 * 1000) {
       juegos = cacheEntry.data;
+    } else if (!hayProximo) {
+      continue;
     } else {
       try {
         console.log(`📡 Consultando The Odds API para: ${sportKey}...`);
@@ -518,8 +546,14 @@ async function enriquecerConCuotas(eventos) {
               Object.assign(estadoOddsApi, { restantes, usados: Number(response.headers['x-requests-used']) || null, actualizado: new Date().toISOString() });
             }
             if (response.data) {
-              juegos = response.data.data || response.data;
+              // Se guarda solo lo que se usa (la primera casa de apuestas) para no llenar Firebase.
+              juegos = (response.data.data || response.data || []).map(g => ({
+                home_team: g.home_team, away_team: g.away_team, commence_time: g.commence_time,
+                casas: (g.bookmakers || []).length, bookmakers: (g.bookmakers || []).slice(0, 1)
+              }));
               oddsCache[sportKey] = { data: juegos, timestamp: Date.now() };
+              db.ref(`cacheCuotas/${sportKey}`).set({ data: juegos, timestamp: oddsCache[sportKey].timestamp })
+                .catch(e => console.warn(`No se pudo guardar la copia de cuotas de ${sportKey}:`, e.message));
               success = true;
               break;
             }
@@ -690,7 +724,7 @@ app.get('/api/ping', (req, res) => {
 
 // Versión del servidor: el script de publicación espera a que Render tenga esta antes de subir la web.
 app.get('/api/version', (req, res) => {
-  res.json({ version: 'etapa7' });
+  res.json({ version: 'etapa8' });
 });
 
 app.get('/api/health', (req, res) => {
@@ -745,7 +779,7 @@ app.get('/api/admin/diagnostico-cuotas', soloCEO, operacion(async (req) => {
       const sportKey = e.sport === 'soccer' ? (ODDS_POR_RUTA[e.ruta] || null) : null;
       const juegos = (sportKey && oddsCache[sportKey]?.data) || [];
       const candidatos = juegos
-        .map(g => ({ partidoOddsApi: `${g.home_team} vs ${g.away_team}`, inicio: g.commence_time, casas: (g.bookmakers || []).length, parecido: Number(coincideEquipo(e, g).score.toFixed(2)) }))
+        .map(g => ({ partidoOddsApi: `${g.home_team} vs ${g.away_team}`, inicio: g.commence_time, casas: g.casas ?? (g.bookmakers || []).length, parecido: Number(coincideEquipo(e, g).score.toFixed(2)) }))
         .sort((a, b) => b.parecido - a.parecido).slice(0, 3);
       return {
         partido: `${e.local} vs ${e.visitante}`, liga: e.liga, ruta: e.ruta, inicio: e.horaInicio,
@@ -758,6 +792,47 @@ app.get('/api/admin/diagnostico-cuotas', soloCEO, operacion(async (req) => {
     })
   };
 }));
+// ---------- Ranking semanal y apodo ----------
+const limiteApodo = limitador({ ventanaMs: 60 * 60 * 1000, maximo: 20, clave: porUsuario });
+app.post('/api/perfil/apodo', requerirSesion, limiteApodo, operacion((req) => operaciones.fijarApodo(req)));
+// Cualquiera con sesión ve el top 10 (solo apodos, nunca nombres) y su propia situación.
+app.get('/api/ranking', requerirSesion, operacion(async (req) => ranking.publico(req.usuario.uid)));
+// El CEO ve la semana completa (por defecto la que acaba de terminar) y entrega los premios.
+function semanaPedida(valor) {
+  if (!valor) return semanaAnterior();
+  const sem = semanaPorId(valor);
+  if (!sem) throw new ErrorOperacion(400, 'Semana inválida (usa la fecha del lunes, AAAA-MM-DD)');
+  return sem;
+}
+app.get('/api/admin/ranking', soloCEO, operacion(async (req) => {
+  const sem = semanaPedida(req.query?.semana);
+  const [tabla, estado] = await Promise.all([ranking.calcular(sem), db.ref(`rankingPremios/${sem.id}`).once('value')]);
+  return { ...tabla, terminada: sem.hasta <= Date.now(), entrega: estado.val() || null };
+}));
+app.post('/api/admin/ranking/entregar', soloCEO, operacion(async (req) => {
+  const sem = semanaPedida(req.body?.semana);
+  try {
+    return await ranking.entregar(sem, req.usuario.uid, req.id);
+  } catch (err) {
+    if (err.estado) throw new ErrorOperacion(err.estado, err.message);
+    throw err;
+  }
+}));
+
+// ---------- Fotos de comprobantes: se limpian de metadatos (GPS, móvil...) antes de subirlas ----------
+const limiteFotos = limitador({ ventanaMs: 60 * 1000, maximo: 10, clave: porUsuario });
+app.post('/api/imagen', requerirSesion, limiteFotos, express.raw({ type: 'image/jpeg', limit: imagenes.TAMANO_MAXIMO }), operacion(async (req) => {
+  if (!config.imgbbKey) throw new ErrorOperacion(503, 'subida-no-configurada');
+  let limpia;
+  try { limpia = imagenes.limpiarJpeg(req.body); } catch (e) {
+    if (e instanceof imagenes.ImagenInvalida) throw new ErrorOperacion(400, e.message);
+    throw e;
+  }
+  const url = await imagenes.subirAImgbb(limpia, config.imgbbKey);
+  await auditoria.registrarSeguro({ accion: 'foto_subida', actor: req.usuario.uid, requestId: req.id, detalles: { bytes: limpia.length } });
+  return { url };
+}));
+
 // Liquidación automática bajo demanda (el CEO no tiene que esperar los 30 min).
 app.post('/api/admin/liquidar-ahora', soloCEO, operacion(async () => ({ liquidadas: await liquidarApuestasAutomatico() })));
 // Avisos a Telegram desde el navegador: el token ya no viaja al frontend.
@@ -1675,6 +1750,8 @@ function programarReportes() {
   programar2pm();
   programarMonitoreo();
   setInterval(liquidarApuestasAutomatico, 30*60*1000);
+  // Cada hora: si ya empezó una semana nueva, avisa al CEO de los ganadores (una sola vez).
+  setInterval(() => ranking.avisarSemanaTerminada().catch(e => console.error('Aviso de ranking:', e.message)), 60*60*1000);
   setTimeout(liquidarApuestasAutomatico, 5*60*1000);
   console.log('Sistema automatizado: reportes 8am/2pm Cuba, liquidacion 30min, monitoreo 24h.');
 }

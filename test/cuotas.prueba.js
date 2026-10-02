@@ -3,7 +3,7 @@
 'use strict';
 
 const crypto = require('crypto');
-const { set, arrancar, ok } = require('./simulador');
+const { get, set, arrancar, ok } = require('./simulador');
 
 const legado = (pw, sal) => crypto.createHash('sha256').update(pw + sal + 'BetGroup-S3cr3t0-2026').digest('hex');
 set('credenciales_acceso/ceo-x-com', { email: 'ceo@x.com', uid: 'BG_ceo', salt: '0a0b0c0d', hash: legado('ceo-clave-1', '0a0b0c0d') });
@@ -70,6 +70,8 @@ arrancar({
     ok(esp && esp.cuota_local === 1.3, 'LaLiga ("Spanish LALIGA" en ESPN) también recibe sus cuotas');
     ok(!pedidas.some(u => u.includes('/soccer_epl/')), 'no se gastan créditos pidiendo la Premier para partidos de otras ligas');
 
+    const copia = get('cacheCuotas/soccer_argentina_primera_division');
+    ok(copia && copia.data.length === 2 && copia.data[0].bookmakers.length === 1, 'las cuotas se guardan en Firebase (al despertar Render no se vuelven a pagar)');
     // Diagnóstico del CEO
     const login = await (await fetchReal('http://127.0.0.1:3993/api/auth/login', {
       method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ identificador: 'ceo@x.com', password: 'ceo-clave-1' })
