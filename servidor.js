@@ -203,12 +203,19 @@ function parseEvents(espnData, sport, ruta = null) {
       };
       
       const getLogo = (c) => {
-    // Deportes de equipo: usar logo del equipo
-    if (c?.team?.logo) return c.team.logo;
-    // Deportes individuales: usar foto del atleta
-    if (c?.athlete?.headshot) return c.athlete.headshot;
-    return null;
-  };
+        // Deportes de equipo: escudo oficial del equipo.
+        if (c?.team?.logo) return c.team.logo;
+        // MMA, boxeo, tenis: foto del deportista. ESPN la manda como texto o como {href}.
+        const foto = c?.athlete?.headshot;
+        if (typeof foto === 'string' && foto) return foto;
+        if (foto && typeof foto.href === 'string' && foto.href) return foto.href;
+        // Si no viene, ESPN publica la foto con una dirección fija según el ID del luchador.
+        const idAtleta = String(c?.athlete?.id || c?.id || '');
+        if (String(sport).toLowerCase() === 'mma' && /^[0-9]{1,12}$/.test(idAtleta)) {
+          return `https://a.espncdn.com/i/headshots/mma/players/full/${idAtleta}.png`;
+        }
+        return null;
+      };
 
       const status = competitionStatus || ev.status?.type;
       if (!status) continue;
