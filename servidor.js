@@ -1170,7 +1170,10 @@ app.post('/api/admin/aplicar-codigo', requerirSesion, limiteIA, async (req, res)
   try {
     let rol = null;
     const resultado = await db.ref(`codigosRol/${codigo}`).transaction((c) => {
-      if (!c || c.usado || !(c.expira > Date.now()) || !NIVEL_DE_CODIGO[c.rol]) return undefined;
+      rol = null;
+      // Firebase llama primero con null si aún no tiene el dato: devolver null fuerza la lectura real.
+      if (c === null) return null;
+      if (c.usado || !(c.expira > Date.now()) || !NIVEL_DE_CODIGO[c.rol]) return undefined;
       rol = c.rol;
       return { ...c, usado: true, usadoPor: uid, usadoEn: Date.now() };
     });
