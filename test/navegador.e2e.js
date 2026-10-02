@@ -102,7 +102,9 @@ http.createServer((req, res) => {
       'apuesta desde la web: registrada en el servidor y saldo 500 → ' + get('users/BG_m1/creditoReal'));
 
     // Mercado de más/menos goles desde la web
+    ok(!(await pagina.isVisible('.bg-cuota:has-text("Más de 2.5")')), 'los mercados extra empiezan ocultos');
     await pagina.click('.bg-mas');
+    ok(await pagina.isVisible('.bg-cuota:has-text("Más de 2.5")') && (await pagina.textContent('.bg-mas')).includes('Ocultar'), 'al pulsar "+ mercados" aparecen (antes el botón no hacía nada visible)');
     await pagina.click('.bg-cuota:has-text("Más de 2.5")');
     ok((await pagina.textContent('#bsSelection')).trim() === 'Más de 2.5', 'el boleto muestra "Más de 2.5" (antes decía "Empate")');
     await pagina.fill('#betInput', '100');

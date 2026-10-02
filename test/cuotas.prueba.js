@@ -36,18 +36,33 @@ const oddsEsp = [
   { home_team: 'Real Madrid', away_team: 'Getafe', commence_time: iso(hoy), bookmakers: [{ markets: [h2h('Real Madrid', 'Getafe', 1.3, 5.5, 9.0)] }] }
 ];
 
+// Serie A y Portugal: nombres que ESPN y The Odds API escriben distinto.
+const espnIta = { leagues: [{ name: 'Italian Serie A' }], events: [{ id: 'ITA1', date: iso(hoy), status: { type: { state: 'pre' } }, competitions: [{ status: { type: { state: 'pre' } }, competitors: [
+  { homeAway: 'home', team: { displayName: 'Internazionale' } }, { homeAway: 'away', team: { displayName: 'Hellas Verona' } }] }] }] };
+const espnPor = { leagues: [{ name: 'Portuguese Primeira Liga' }], events: [{ id: 'POR1', date: iso(hoy), status: { type: { state: 'pre' } }, competitions: [{ status: { type: { state: 'pre' } }, competitors: [
+  { homeAway: 'home', team: { displayName: 'Sporting CP' } }, { homeAway: 'away', team: { displayName: 'Vitória de Guimarães' } }] }] }] };
+const espnDen = { leagues: [{ name: 'Danish Superliga' }], events: [{ id: 'DEN1', date: iso(hoy), status: { type: { state: 'pre' } }, competitions: [{ status: { type: { state: 'pre' } }, competitors: [
+  { homeAway: 'home', team: { displayName: 'Brøndby IF' } }, { homeAway: 'away', team: { displayName: 'FC København' } }] }] }] };
+const oddsIta = [{ home_team: 'Inter Milan', away_team: 'Hellas Verona FC', commence_time: iso(hoy), bookmakers: [{ markets: [h2h('Inter Milan', 'Hellas Verona FC', 1.25, 6.0, 11.0)] }] }];
+const oddsPor = [{ home_team: 'Sporting Lisbon', away_team: 'Vitoria Guimaraes', commence_time: iso(hoy), bookmakers: [{ markets: [h2h('Sporting Lisbon', 'Vitoria Guimaraes', 1.4, 4.6, 7.5)] }] }];
+const oddsDen = [{ home_team: 'Brondby IF', away_team: 'FC Copenhagen', commence_time: iso(hoy), bookmakers: [{ markets: [h2h('Brondby IF', 'FC Copenhagen', 2.9, 3.4, 2.3)] }] }];
+
 const pedidas = [];
 const fetchReal = global.fetch;
 arrancar({
   puerto: 3993,
   env: { ODDS_API_KEYS: 'k1' },
-  espn: (p) => (p.includes('soccer/arg.1') ? JSON.stringify(espnArg) : p.includes('soccer/esp.1') ? JSON.stringify(espnEsp) : null),
+  espn: (p) => (p.includes('soccer/arg.1') ? JSON.stringify(espnArg) : p.includes('soccer/esp.1') ? JSON.stringify(espnEsp)
+    : p.includes('soccer/ita.1') ? JSON.stringify(espnIta) : p.includes('soccer/por.1') ? JSON.stringify(espnPor) : p.includes('soccer/den.1') ? JSON.stringify(espnDen) : null),
   axiosGet: async (url) => {
     if (!url.includes('the-odds-api')) throw new Error('sin red');
     pedidas.push(url);
     const cab = { 'x-requests-remaining': '412', 'x-requests-used': '88' };
     if (url.includes('/soccer_argentina_primera_division/')) return { data: oddsArg, headers: cab };
     if (url.includes('/soccer_spain_la_liga/')) return { data: oddsEsp, headers: cab };
+    if (url.includes('/soccer_italy_serie_a/')) return { data: oddsIta, headers: cab };
+    if (url.includes('/soccer_portugal_primeira_liga/')) return { data: oddsPor, headers: cab };
+    if (url.includes('/soccer_denmark_superliga/')) return { data: oddsDen, headers: cab };
     return { data: [], headers: cab };
   }
 });
@@ -70,6 +85,10 @@ arrancar({
     ok(esp && esp.cuota_local === 1.3, 'LaLiga ("Spanish LALIGA" en ESPN) también recibe sus cuotas');
     ok(!pedidas.some(u => u.includes('/soccer_epl/')), 'no se gastan créditos pidiendo la Premier para partidos de otras ligas');
 
+    const cuota = (local) => ((fx.data || []).find(e => e.local === local) || {}).cuota_local;
+    ok(cuota('Internazionale') === 1.25, 'Serie A: "Internazionale" (ESPN) = "Inter Milan" (cuotas) → ' + cuota('Internazionale'));
+    ok(cuota('Sporting CP') === 1.4, 'Portugal: "Sporting CP" = "Sporting Lisbon" y "Vitória de Guimarães" = "Vitoria Guimaraes" → ' + cuota('Sporting CP'));
+    ok(cuota('Brøndby IF') === 2.9, 'Superliga danesa: "Brøndby" = "Brondby" y "København" = "Copenhagen" → ' + cuota('Brøndby IF'));
     const copia = get('cacheCuotas/soccer_argentina_primera_division');
     ok(copia && copia.data.length === 2 && copia.data[0].bookmakers.length === 1, 'las cuotas se guardan en Firebase (al despertar Render no se vuelven a pagar)');
     // Diagnóstico del CEO

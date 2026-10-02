@@ -273,6 +273,8 @@ function limpiarNombre(nombre) {
   return nombre
     .toLowerCase()
     .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+    // Letras que no se descomponen solas: Brøndby, Bodø, Śląsk/Wrocław, Kærup, Straße...
+    .replace(/ø/g, 'o').replace(/æ/g, 'ae').replace(/ł/g, 'l').replace(/ß/g, 'ss').replace(/đ/g, 'd')
     .replace(/^ny\b|\bny$/g, 'new york')
     .replace(/^la\b|\bla$/g, 'los angeles')
     .replace(/^st\b|\bst\.?$/g, 'saint')
@@ -333,13 +335,27 @@ function tieneCodigoISO(nombre) {
 // Palabras que no distinguen a un equipo ("CA Independiente" = "Independiente",
 // "Instituto de Córdoba" ≈ "Instituto"). Las que sí distinguen (city, united, real...) se quedan.
 const PALABRAS_VACIAS = new Set(['ca', 'cd', 'cs', 'sd', 'ud', 'sad', 'de', 'del', 'la', 'el', 'los', 'las', 'y', 'e']);
+// Clubes que ESPN y The Odds API llaman de forma totalmente distinta (ya limpios con limpiarNombre).
+const ALIAS_EQUIPOS = Object.freeze({
+  'internazionale': 'inter milan',
+  'sporting cp': 'sporting lisbon',
+  'olympique lyonnais': 'lyon',
+  'stade rennais': 'rennes',
+  'stade brestois 29': 'brest', 'stade brestois': 'brest',
+  'atletico mg': 'atletico mineiro', 'athletico pr': 'athletico paranaense',
+  'kobenhavn': 'copenhagen', 'legia warszawa': 'legia warsaw'
+});
+function nombreCanonico(nombre) {
+  const l = limpiarNombre(nombre);
+  return ALIAS_EQUIPOS[l] || l;
+}
 function fichasEquipo(nombre) {
-  return new Set(limpiarNombre(nombre).split(' ').filter(t => t.length > 1 && !PALABRAS_VACIAS.has(t)));
+  return new Set(nombreCanonico(nombre).split(' ').filter(t => t.length > 1 && !PALABRAS_VACIAS.has(t)));
 }
 
 // Parecido entre dos nombres del mismo equipo (0 a 1).
 function parecidoEquipo(a, b) {
-  const la = limpiarNombre(a), lb = limpiarNombre(b);
+  const la = nombreCanonico(a), lb = nombreCanonico(b);
   if (!la || !lb) return 0;
   if (la === lb) return 1;
   const fa = fichasEquipo(a), fb = fichasEquipo(b);
@@ -771,8 +787,12 @@ app.post('/api/admin/eliminar-usuario', soloCEO, operacion((req) => operaciones.
 // Diagnóstico de cuotas: ¿por qué un partido sale sin cuota? (busca por nombre de equipo)
 app.get('/api/admin/diagnostico-cuotas', soloCEO, operacion(async (req) => {
   const q = limpiarNombre(validar.texto(req.query?.q, 60) || '');
-  if (q.length < 3) throw new ErrorOperacion(400, 'Escribe al menos 3 letras de un equipo');
-  const eventos = (getCache('fixtures')?.data || []).filter(e => limpiarNombre(`${e.local} ${e.visitante}`).includes(q)).slice(0, 5);
+  if (q.length < 3) throw new ErrorOperacion(400, 'Escribe al menos 3 letras de un equipo (o "sincuota")');
+  const todos = getCache('fixtures')?.data || [];
+  // "sincuota": todos los partidos próximos que se quedaron sin cuota, para revisarlos de una vez.
+  const eventos = q === 'sincuota'
+    ? todos.filter(e => e.estado === 'scheduled' && !(Number(e.cuota_local) > 1)).slice(0, 40)
+    : todos.filter(e => limpiarNombre(`${e.local} ${e.visitante}`).includes(q)).slice(0, 5);
   return {
     creditosOddsApi: estadoOddsApi,
     partidos: eventos.map(e => {
@@ -780,7 +800,7 @@ app.get('/api/admin/diagnostico-cuotas', soloCEO, operacion(async (req) => {
       const juegos = (sportKey && oddsCache[sportKey]?.data) || [];
       const candidatos = juegos
         .map(g => ({ partidoOddsApi: `${g.home_team} vs ${g.away_team}`, inicio: g.commence_time, casas: g.casas ?? (g.bookmakers || []).length, parecido: Number(coincideEquipo(e, g).score.toFixed(2)) }))
-        .sort((a, b) => b.parecido - a.parecido).slice(0, 3);
+        .sort((a, b) => b.parecido - a.parecido).slice(0, q === 'sincuota' ? 1 : 3);
       return {
         partido: `${e.local} vs ${e.visitante}`, liga: e.liga, ruta: e.ruta, inicio: e.horaInicio,
         competicionOddsApi: sportKey, region: sportKey ? regionDeCuotas(sportKey) : null,
