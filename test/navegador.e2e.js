@@ -31,7 +31,8 @@ arrancar({
   env: { ODDS_API_KEYS: 'k1', ALLOWED_ORIGINS: `http://127.0.0.1:${PUERTO_WEB}` },
   espn: (p) => (p.includes('soccer/eng.1') ? JSON.stringify(evento) : null),
   axiosGet: async (url) => {
-    if (url.includes('the-odds-api')) return { data: [{ home_team: 'Equipo A', away_team: 'Equipo B', bookmakers: [{ markets: [{ key: 'h2h', outcomes: [{ name: 'Equipo A', price: 1.8 }, { name: 'Equipo B', price: 2.1 }, { name: 'Draw', price: 3.2 }] }] }] }] };
+    if (url.includes('the-odds-api')) return { data: [{ home_team: 'Equipo A', away_team: 'Equipo B', bookmakers: [{ markets: [{ key: 'h2h', outcomes: [{ name: 'Equipo A', price: 1.8 }, { name: 'Equipo B', price: 2.1 }, { name: 'Draw', price: 3.2 }] },
+      { key: 'totals', outcomes: [{ name: 'Over', point: 2.5, price: 1.9 }, { name: 'Under', point: 2.5, price: 1.95 }] }] }] }] };
     throw new Error('sin red');
   }
 });
@@ -94,8 +95,16 @@ http.createServer((req, res) => {
     ok(apuestas.length === 1 && apuestas[0].cuota === 1.8 && apuestas[0].estado === 'pendiente' && get('users/BG_m1/creditoReal') === 400,
       'apuesta desde la web: registrada en el servidor y saldo 500 → ' + get('users/BG_m1/creditoReal'));
 
+    // Mercado de más/menos goles desde la web
+    await pagina.click('.extra-btn:has-text("Over 2.5")');
+    ok((await pagina.textContent('#bsSelection')).trim() === 'Over 2.5', 'el boleto muestra "Over 2.5" (antes decía "Empate")');
+    await pagina.fill('#betInput', '100');
+    await pagina.click('#confirmBetBtn');
+    await pagina.waitForFunction(() => document.getElementById('toast').textContent.includes('×1.9'), null, { timeout: 15000 });
+    ok(Object.values(get('apuestas/BG_m1')).some(a => a.tipo === 'Over 2.5' && a.cuota === 1.9), 'apuesta Over 2.5 desde la web a la cuota del servidor');
+
     const ataque = await pagina.evaluate(() => db.ref('users/BG_m1/creditoReal').set(99999).then(() => 'escrito', (e) => e.message));
-    ok(ataque !== 'escrito' && get('users/BG_m1/creditoReal') === 400, 'intento de subirse el saldo desde la consola del navegador: rechazado (' + ataque + ')');
+    ok(ataque !== 'escrito' && get('users/BG_m1/creditoReal') === 300, 'intento de subirse el saldo desde la consola del navegador: rechazado (' + ataque + ')');
     const ataque2 = await pagina.evaluate(() => {
       const k = Object.keys(window.__x || {});
       return db.ref('apuestas/BG_m1').once('value').then(s => { const id = Object.keys(s.val())[0]; return db.ref('apuestas/BG_m1/' + id + '/estado').set('ganada'); }).then(() => 'escrito', (e) => e.message);
@@ -120,7 +129,7 @@ http.createServer((req, res) => {
     await pagina.waitForSelector('text=Aprobar y acreditar', { timeout: 15000 });
     await pagina.click('#solicitudesList >> text=Aprobar y acreditar');
     await pagina.waitForFunction(() => document.getElementById('toast').textContent.includes('Depósito aprobado'), null, { timeout: 15000 });
-    ok(get('users/BG_m1/creditoReal') === 600 && get('solicitudesDeposito/DEPWEB1/estado') === 'aprobado', 'CEO aprueba el depósito desde su panel: saldo 400 → ' + get('users/BG_m1/creditoReal'));
+    ok(get('users/BG_m1/creditoReal') === 500 && get('solicitudesDeposito/DEPWEB1/estado') === 'aprobado', 'CEO aprueba el depósito desde su panel: saldo 300 → ' + get('users/BG_m1/creditoReal'));
 
     await pagina.evaluate(() => goPanel('ceo'));
     await pagina.waitForFunction(() => document.querySelectorAll('#adjUser option').length > 1, null, { timeout: 15000 });
@@ -131,6 +140,10 @@ http.createServer((req, res) => {
     await pagina.click('text=Aplicar ajuste');
     await pagina.waitForFunction(() => document.getElementById('toast').textContent.includes('Ajuste aplicado'), null, { timeout: 15000 });
     ok(get('users/BG_m1/creditoPromo') === 50, 'CEO ajusta saldo promo desde su panel → ' + get('users/BG_m1/creditoPromo'));
+
+    await pagina.click('text=Liquidar ahora');
+    await pagina.waitForFunction(() => document.getElementById('toast').textContent.includes('apuestas liquidadas'), null, { timeout: 15000 });
+    ok(true, 'botón "Liquidar ahora" del CEO responde');
 
     await pagina.reload();
     await pagina.waitForSelector('#tabCEO', { state: 'visible', timeout: 15000 });

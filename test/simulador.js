@@ -28,8 +28,17 @@ function set(p, v) {
     if (typeof n[k] !== 'object' || n[k] === null) n[k] = {};
     n = n[k];
   }
-  if (v === null || v === undefined) delete n[ks.at(-1)];
-  else n[ks.at(-1)] = copiar(v);
+  if (v === null || v === undefined) {
+    delete n[ks.at(-1)];
+    // Como Firebase: las carpetas que se quedan vacías desaparecen.
+    for (let i = ks.length - 1; i > 0; i--) {
+      let padre = raiz;
+      for (const k of ks.slice(0, i - 1)) padre = padre[k];
+      const hijo = padre[ks[i - 1]];
+      if (hijo && typeof hijo === 'object' && Object.keys(hijo).length === 0) delete padre[ks[i - 1]];
+      else break;
+    }
+  } else n[ks.at(-1)] = copiar(v);
 }
 
 function snap(v, clave = null, orden = null) {
