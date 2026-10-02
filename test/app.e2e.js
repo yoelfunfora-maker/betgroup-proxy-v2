@@ -21,7 +21,7 @@ set('apuestas/BG_m1/b1', { eventoNombre: 'Equipo A vs Equipo B', monto: 100, cuo
 set('config', { minBet: 100, maxBet: 500 });
 arrancar({ puerto: PUERTO_API, env: { ODDS_API_KEYS: '', ALLOWED_ORIGINS: `http://127.0.0.1:${PUERTO_WEB}` } });
 
-const TIPOS = { '.js': 'text/javascript', '.woff2': 'font/woff2', '.png': 'image/png', '.json': 'application/manifest+json', '.svg': 'image/svg+xml' };
+const TIPOS = { '.webp': 'image/webp', '.js': 'text/javascript', '.woff2': 'font/woff2', '.png': 'image/png', '.json': 'application/manifest+json', '.svg': 'image/svg+xml' };
 http.createServer((req, res) => {
   const f = path.join(FRONT, decodeURIComponent(req.url.split('?')[0]).replace(/^\/+/, '') || 'index.html');
   if (!f.startsWith(FRONT) || !fs.existsSync(f) || fs.statSync(f).isDirectory()) { res.writeHead(404); return res.end(); }
