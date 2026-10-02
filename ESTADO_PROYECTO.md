@@ -2,7 +2,7 @@
 
 **Este archivo es el "mismo sitio" real que exige el Protocolo de trabajo de Fundora — cualquier sistema de IA (Claude, DeepSeek, Gemini, u otro) que trabaje aquí debe leerlo primero, y actualizarlo al final de cada sesión real.**
 
-Última actualización: 24 de agosto de 2026.
+Última actualización: 2 de octubre de 2026.
 
 ## ⚠️ Protocolo de trabajo OBLIGATORIO para este proyecto (más estricto que el resto)
 
@@ -15,7 +15,7 @@
 
 ## Stack real
 
-**Este único servicio de Render sirve el backend Y el frontend juntos** (confirmado por Yoel, 24 ago) — `betgroup-cuba-2024.web.app` NO se despliega vía Firebase Hosting como se creía antes, se sirve desde aquí mismo. El repo `betgroup-pro` está casi vacío y no participa del despliegue real — ver su propio ESTADO_PROYECTO.md.
+**Este único servicio de Render sirve el backend Y el frontend juntos** (confirmado por Yoel, 24 ago — ⚠️ pero `servidor.js` no tiene ninguna ruta que sirva `index.html`; pendiente de aclarar desde dónde se publica realmente el frontend) — `betgroup-cuba-2024.web.app` NO se despliega vía Firebase Hosting como se creía antes, se sirve desde aquí mismo. El repo `betgroup-pro` está casi vacío y no participa del despliegue real — ver su propio ESTADO_PROYECTO.md.
 
 Node.js/Express en Render + Firebase Realtime Database (la base de datos sí es real de Firebase, solo el hosting del sitio no).
 
@@ -38,6 +38,50 @@ Node.js/Express en Render + Firebase Realtime Database (la base de datos sí es 
 - Error de parseo de clave privada en `serviceAccountKey.json` bajo Node.js en Termux — solución propuesta: migrar a Google Cloud Functions
 - `deleteUser` todavía llama a `localhost:3000` en vez de ir directo a RTDB
 - 3 claves de Odds API rotan según hora del día (renovadas 1 jul) — Yoel mencionó que debería existir una cuarta clave
+
+## Etapa 1 de seguridad — 2 oct 2026 (rama `claude/upbeat-cerf-rpytdm`, SIN desplegar)
+
+Autorizada por Yoel. Cambios en commits separados:
+
+1. Claves fuera del código → `lib/config.js` + `.env.example`.
+2. CORS solo para nuestras webs, cabeceras de seguridad, límite de peticiones, errores sin detalles internos (`lib/seguridad.js`).
+3. Auditoría encadenada y firmada HMAC-SHA256 en `auditoria/` (`lib/auditoria.js`).
+4. Login en el servidor: `POST /api/auth/login` → token de 12 h. Migra los hashes viejos a PBKDF2-SHA256 (600.000 iteraciones) en `credenciales_servidor/` y borra `hash`/`salt` de `credenciales_acceso` y `users` (`lib/autenticacion.js`).
+5. Todos los endpoints exigen sesión y rol (ver tabla abajo); entradas validadas (`lib/validacion.js`).
+6. Telegram sin email/teléfono/saldo; verificador Geminis02 revisa este servidor desde dentro.
+7. `GET /api/admin/auditoria/verificar`.
+8. `package-lock.json`, firebase-admin 11 → 14 (API modular).
+
+### Antes de desplegar en Render (orden obligatorio)
+
+1. Rotar TODAS las claves filtradas (Telegram, 3× Odds API, Gemini, Groq, ImgBB, UptimeRobot) — siguen en el historial de git.
+2. Crear en Render las variables de `.env.example`. Obligatorias: `FIREBASE_SERVICE_ACCOUNT_B64`, `SESSION_SECRET`, `AUDIT_SECRET`. Para no dejar a nadie fuera: `LEGACY_PASSWORD_PEPPER` = el secreto viejo del login.
+3. Actualizar el frontend (ver "Contrato para el frontend") y desplegar ambos a la vez: el frontend actual NO envía token y dejará de funcionar con este backend.
+
+### Contrato para el frontend
+
+- Login: `POST /api/auth/login {email, password}` → `{token, expiraEn, usuario}`. Guardar el token en memoria/`sessionStorage`, nunca la contraseña.
+- Cada llamada protegida: cabecera `Authorization: Bearer <token>`. Un 401 = volver a la pantalla de login.
+- Logout: `POST /api/auth/logout`. Perfil: `GET /api/auth/yo`.
+- `/api/apostar` ya no acepta `uid` (sale de la sesión).
+- `/api/admin/generar-codigo` pasa de GET a POST `{rol}`; `/api/admin/aplicar-codigo {codigo}` se aplica a quien está conectado.
+- `/api/usuarios/mis-referidos` ya no necesita `subadminUid` (el CEO puede seguir pasándolo).
+
+| Acceso | Endpoints |
+|---|---|
+| Público | `/`, `/api/ping`, `/api/health`, `/api/fixtures`, `/api/auth/login` |
+| Con sesión | `/api/apostar`, `/api/saldo/:uid` (propio), `/api/chat`, `/api/huggingface`, `/api/enriquecer`, `/api/admin/aplicar-codigo`, `/api/auth/*` |
+| Subadmin+ | `/api/usuarios/mis-referidos` |
+| Solo CEO | `/api/admin/*`, `/api/apuestas/liquidar`, `/api/test-reporte`, `/api/debug-reporte`, `/api/estado-sistema`, `/api/agents-status`, `/api/verificacion-geminis`, `/api/huggingface/cuotas` |
+
+### Lo que la Etapa 1 NO arregla todavía
+
+- **El frontend escribe saldos y apuestas directamente en Firebase.** Mientras las reglas de RTDB lo permitan, cualquiera puede saltarse el servidor → Etapa 3 (reglas) es imprescindible.
+- Doble gasto, doble pago, cuota elegida por el cliente, promo→real → Etapa 2.
+- Registro sigue siendo del lado del cliente (puede elegir su rol) → Etapa 3.
+- Sellado RFC 3161 con TSA externa de la cadena de auditoría → pendiente.
+- `uuid` (moderada, dependencia interna de firebase-admin) sin arreglo publicado aún.
+- `server.js` y `servidor.js.bak_*` siguen en el repo (sin autorización para borrarlos).
 
 ## Reglas fijas
 
