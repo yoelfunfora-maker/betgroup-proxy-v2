@@ -35,6 +35,14 @@ set('apuestas/BG_a2/promo', { monto: 100, cuota: 2.5, estado: 'ganada', pago: 15
 // Cuenta que solo juega el bono (y pierde): es jugador de A pero NO cuenta como activo.
 usuario('BG_a8', { nombre: 'Solo bono', rol: 'member', rolLevel: 1, referidoPorUid: 'BG_A' });
 set('apuestas/BG_a8/bono', { monto: 100, cuota: 2, estado: 'perdida', pago: 0, fecha: tp, liquidadaEn: tp, tipoSaldo: 'promo', saldoCampo: 'creditoPromo', reglaPromo: 'ganancia-a-real' });
+// Inyección de la red de A en la semana pasada: depósitos 1.000 + 2.000, retiro 500 → neta 2.500 → 3 % = 75.
+set('solicitudesDeposito/S1', { userId: 'BG_a1', monto: 1000, moneda: 'CUP', estado: 'aprobado', aprobadoEn: tp });
+set('depositos/D1', { userId: 'BG_a2', monto: 2000, moneda: 'CUP', estado: 'approved', aprobadoEn: tp });
+set('solicitudesRetiro/R1', { userId: 'BG_a3', monto: 500, estado: 'completado', creadoEn: tp });
+set('solicitudesRetiro/R2', { userId: 'BG_a4', monto: 9999, estado: 'rechazado', creadoEn: tp });        // rechazado: no resta
+set('solicitudesDeposito/S2', { userId: 'BG_a5', monto: 7000, moneda: 'CUP', estado: 'pendiente' });     // sin aprobar: no suma
+set('solicitudesDeposito/S3', { userId: 'BG_a8', monto: 5000, moneda: 'CUP', estado: 'aprobado', aprobadoEn: tp }); // jugador no activo: no suma
+set('solicitudesDeposito/S4', { userId: 'BG_b2', monto: 4000, moneda: 'CUP', estado: 'aprobado', aprobadoEn: tp }); // red de B en pérdida: no se paga
 set('apuestas/BG_a3/pend', { monto: 500, cuota: 2, estado: 'pendiente', fecha: tp, tipoSaldo: 'real' }); // pendiente: no cuenta
 // Agente B: 2 jugadores que GANARON a la casa 1.000 la semana pasada; esta semana pierden 1.500.
 usuario('BG_b1', { nombre: 'Jugador b1', rol: 'member', rolLevel: 1, referidoPor: 'BGB0001' });
@@ -58,9 +66,13 @@ const entrar = async (uid) => (await llamar('POST', '/api/auth/login', { identif
     ok(s === 200 && A.jugadores === 8 && A.activos === 7, 'el agente A tiene 8 jugadores, pero solo 7 activos: el que solo jugó el bono no cuenta');
     ok(A.ganancia === 5850, 'ganancia de la red de A: 12.000 apostado − 6.000 pagado − 150 de promo (la pendiente no cuenta) → ' + A.ganancia);
     ok(A.pct === 0.10 && A.comisionAgente === 585, '7 activos → 10 % para el agente: 585 CR');
-    ok(A.comisionSupervisor === 292.5 && A.casa === 4972.5, 'supervisora 5 %: 292,5 CR · casa: 4.972,5 CR (≥ 70 %)');
+    ok(A.depositado === 3000 && A.retirado === 500 && A.inyeccionNeta === 2500 && A.comisionInyeccion === 75,
+      'inyección neta de A: 3.000 depositado − 500 retirado = 2.500 → 3 % = 75 CR (no cuentan lo rechazado, lo pendiente ni el jugador inactivo)');
+    ok(A.totalAgente === 660, 'el agente A cobra en total 585 (ganancia) + 75 (inyección) = 660 CR');
+    ok(A.comisionSupervisor === 292.5 && A.casa === 4897.5, 'supervisora 5 %: 292,5 CR · casa: 4.897,5 CR');
     ok(B.ganancia === -1000 && B.comisionAgente === 0 && B.arrastreSiguiente === -1000, 'red de B en pérdidas (−1.000): sin comisión y la pérdida pasa a la semana siguiente');
-    ok(j.totales.casa === 4972.5 - 1000, 'totales para el CEO: casa ' + j.totales.casa);
+    ok(B.inyeccionNeta === 4000 && B.comisionInyeccion === 0, 'B inyectó 4.000 pero la casa perdió con su red: no cobra el 3 % (solo si la casa gana)');
+    ok(j.totales.casa === 4897.5 - 1000 && j.totales.comisionInyeccion === 75, 'totales para el CEO: casa ' + j.totales.casa + ' · inyección pagada ' + j.totales.comisionInyeccion);
 
     // ---- Quién ve qué ----
     [s, j] = await llamar('GET', `/api/comisiones?semana=${pasada.id}`, null, t.BG_A);
