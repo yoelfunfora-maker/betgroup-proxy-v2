@@ -13,6 +13,10 @@ const { crearAuditoria } = require('./lib/auditoria');
 const { crearAutenticacion, NIVEL } = require('./lib/autenticacion');
 const validar = require('./lib/validacion');
 const { crearMotorApuestas, ErrorApuesta } = require('./lib/apuestas');
+const { fusionarCuotasBot } = require('./lib/mercadosBot');
+const { crearProxyDb } = require('./lib/proxyDb');
+const { crearOperaciones, ErrorOperacion } = require('./lib/operaciones');
+const { Denegado, Invalido, DIRECTOR } = require('./lib/politicas');
 const crypto = require('crypto');
 
 const app = express();
@@ -76,7 +80,15 @@ const { requerirSesion, requerirNivel } = auth;
 // Único sitio que coloca y liquida apuestas (ver lib/apuestas.js).
 const motor = crearMotorApuestas({
   db, auditoria,
-  obtenerEventos: () => { const f = getCache('fixtures'); return f && Array.isArray(f.data) ? f.data : null; }
+  obtenerEventos: () => { const f = getCache('fixtures'); return f && Array.isArray(f.data) ? f.data : null; },
+  avisar: (texto) => notificarTelegram(texto)
+});
+// El frontend lee y escribe la base de datos solo a través de /api/db (ver lib/politicas.js).
+const proxyDb = crearProxyDb({ db, auditoria });
+const operaciones = crearOperaciones({
+  db, auditoria, auth, config,
+  notificarTelegram: (t) => notificarTelegram(t),
+  escaparHtml: (t) => escaparHtml(t)
 });
 
 // ==================== CACHÉ ====================
@@ -581,6 +593,7 @@ async function precalentarCache() {
     { path: 'basketball/nba/scoreboard', sport: 'basketball' },
     { path: 'baseball/mlb/scoreboard', sport: 'baseball' },
     { path: 'soccer/fifa.world/scoreboard', sport: 'soccer' },
+    { path: 'soccer/fifa.friendly/scoreboard', sport: 'soccer' },
     { path: 'soccer/eng.1/scoreboard', sport: 'soccer' },
     { path: 'soccer/esp.1/scoreboard', sport: 'soccer' },
     { path: 'soccer/ger.1/scoreboard', sport: 'soccer' },
@@ -616,6 +629,17 @@ async function precalentarCache() {
   }
 
   await enriquecerConCuotas(allEvents);
+  // Cuotas del bot (nodo mercados) y boxeo: antes lo mezclaba el navegador.
+  try {
+    const [mercadosSnap, margenSnap] = await Promise.all([
+      db.ref('mercados').once('value'),
+      db.ref('config/margen').once('value')
+    ]);
+    const margen = Number(margenSnap.val());
+    allEvents = fusionarCuotasBot(allEvents, mercadosSnap.val(), Number.isFinite(margen) && margen >= 0 && margen < 1 ? margen : 0.20);
+  } catch (err) {
+    console.error('No se pudieron mezclar las cuotas del bot:', err.message);
+  }
   // Si las cuotas no se obtuvieron, usar Athos
   const sinCuotas = allEvents.filter(e => !e.cuota_local || e.cuota_local <= 1.0);
   if (sinCuotas.length > 0) {
@@ -665,10 +689,52 @@ app.post('/api/auth/login', limiteLogin, auth.login);
 // Límites por usuario para lo que gasta cuotas de APIs de pago.
 const porUsuario = (req) => (req.usuario ? `u:${req.usuario.uid}` : `ip:${req.ip}`);
 const limiteIA = limitador({ ventanaMs: 60 * 1000, maximo: 10, clave: porUsuario });
+const limiteAvisos = limitador({ ventanaMs: 60 * 1000, maximo: 10, clave: (req) => `aviso:${req.usuario ? req.usuario.uid : req.ip}` });
 const limiteApuestas = limitador({ ventanaMs: 60 * 1000, maximo: 20, clave: porUsuario });
 const soloCEO = [requerirSesion, requerirNivel(NIVEL.CEO)];
+const directorOMas = [requerirSesion, requerirNivel(DIRECTOR)];
+
+// ==================== DINERO Y ADMINISTRACIÓN (ver lib/operaciones.js) ====================
+const ID_RE = /^[A-Za-z0-9_-]{1,80}$/;
+function conId(fn) {
+  return (req) => {
+    if (!ID_RE.test(req.params.id || '')) throw new ErrorOperacion(400, 'Identificador inválido');
+    return fn(req, req.params.id);
+  };
+}
+app.post('/api/depositos/:id/aprobar', directorOMas, operacion(conId(operaciones.aprobarDeposito)));
+app.post('/api/depositos/:id/rechazar', directorOMas, operacion(conId(operaciones.rechazarDeposito)));
+app.post('/api/solicitudes-deposito/:id/aprobar', directorOMas, operacion(conId(operaciones.aprobarSolicitud)));
+app.post('/api/solicitudes-deposito/:id/rechazar', directorOMas, operacion(conId(operaciones.rechazarSolicitud)));
+app.post('/api/admin/ajustar-saldo', soloCEO, operacion((req) => operaciones.ajustarSaldo(req)));
+app.post('/api/admin/asignar-rol', soloCEO, operacion((req) => operaciones.asignarRol(req)));
+app.post('/api/admin/restablecer-clave', soloCEO, operacion((req) => operaciones.restablecerClave(req)));
+// Avisos a Telegram desde el navegador: el token ya no viaja al frontend.
+app.post('/api/notificar', requerirSesion, limiteAvisos, operacion((req) => operaciones.notificar(req)));
+
 app.post('/api/auth/logout', requerirSesion, auth.logout);
 app.get('/api/auth/yo', requerirSesion, auth.yo);
+
+// Envuelve una operación: traduce sus errores a respuestas claras sin filtrar detalles.
+function operacion(fn) {
+  return async (req, res) => {
+    try {
+      res.json({ success: true, ...(await fn(req)) });
+    } catch (err) {
+      if (err instanceof ErrorOperacion || err instanceof Denegado || err instanceof Invalido) {
+        return res.status(err.estado).json({ error: err.message });
+      }
+      responderError(res, req, err, req.path);
+    }
+  };
+}
+const limiteRegistro = limitador({ ventanaMs: 60 * 60 * 1000, maximo: 5, mensaje: 'Demasiados intentos. Prueba en una hora.' });
+app.post('/api/auth/registro', limiteRegistro, operacion((req) => operaciones.registrar(req)));
+app.post('/api/auth/recuperar', limiteRegistro, operacion((req) => operaciones.solicitarRecuperacion(req)));
+
+// ==================== BASE DE DATOS A TRAVÉS DEL SERVIDOR ====================
+const limiteDb = limitador({ ventanaMs: 60 * 1000, maximo: 300, clave: (req) => `db:${req.usuario ? req.usuario.uid : req.ip}` });
+app.post('/api/db', requerirSesion, limiteDb, proxyDb.manejar);
 
 app.get('/api/fixtures', async (req, res) => {
   try {
