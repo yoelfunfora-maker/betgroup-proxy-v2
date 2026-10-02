@@ -209,10 +209,18 @@ Decisión de Yoel: seguir gratis (el sistema aún no da ganancia). Yoel usa 3-4 
 - **Presentación:** SVG + CSS (~3 KB, ~2,4 s), una vez por sesión, se salta tocando, desactivada con "reducir movimiento".
 - **Antifraude (`lib/antifraude.js`), solo avisa:** señales mismo móvil (40), misma cuenta bancaria (35), mismo teléfono (30), apuestas opuestas entre vinculadas (30), retiro sin apostar lo depositado (25), ráfaga de 3+ altas por móvil en 24 h (20), huella idéntica (10). Niveles 30 revisar / 60 alto (Telegram 1 vez al día). Cada 6 h + botón del CEO. Identificadores cifrados con HMAC (AUDIT_SECRET); nodos `riesgo`, `perfilRiesgo`, `dispositivosUso`, `huellasUso` inaccesibles desde /api/db. País de Cloudflare solo informativo (VPN no suma). Rutas: `POST /api/dispositivo`, `GET /api/admin/riesgo`, `POST /api/admin/riesgo/recalcular`.
 - Calibrar 2-4 semanas antes de pensar en bloquear.
-- **Logo real** (escudo dorado con flecha, de `icon.png` del teléfono; copia en la rama `archivos-telefono/externos/imagenes`) en iconos de la app y en la presentación; lema "Plataforma de entretenimiento deportivo" (pedido de Yoel: no decir "apuestas deportivas").
+- **Logo ORIGINAL sin retocar** (decisión de Yoel: no redibujar la marca): iconos = `icon192.png`/`icon512.png` originales del teléfono (copia en la rama `archivos-telefono/externos/imagenes`), logo grande original visible también dentro de la app, presentación con la imagen original; lema "Plataforma de entretenimiento deportivo" (pedido de Yoel: no decir "apuestas deportivas").
 - **Referidos y ganancias del subadmin (fallo corregido):** el registro ya ligaba bien (`referidoPorUid` = quien generó el código), pero el panel del subadmin solo contaba en su recaudado/comisión a los miembros del código fijo antiguo. Ahora `bgFiltrarMiembros()` cuenta referidoPorUid + código fijo + códigos generados. Prueba `test/referidos.e2e.js` (con el código viejo: 100 en vez de 300).
 - Pruebas: `test/antifraude.prueba.js` (17), `test/app.e2e.js` (12 en navegador).
-- Casino: NO construido. Pendiente de decisión de Yoel (ver propuesta en la conversación: juegos propios "provably fair", gratis de construir, mismo riesgo legal que las apuestas).
+- Casino: **aplazado por Yoel** (2 oct). Solo lo quiere por API, sin juegos propios. Investigado: no hay API gratis con dinero real (agregadores = contrato + licencia + excluyen Cuba). Única opción gratis: lobby demo con fichas ficticias (Slots Launch, plan Free; token en el servidor). Nada construido.
+
+## Cierre de la sesión del 2 oct 2026 — pendiente para la próxima
+
+1. **Publicar la web de la Etapa 10** (el servidor ya está en `etapa10`): `git -C ~/bg-frontend-privado fetch -q origin claude/upbeat-cerf-rpytdm && git -C ~/bg-frontend-privado checkout -q -B etapa3 origin/claude/upbeat-cerf-rpytdm && bash ~/bg-frontend-privado/publicar/publicar_web.sh` (copia también sw.js, manifest.json e iconos/).
+2. Tras publicar: instalar la app desde Chrome, aceptar avisos, revisar "Riesgo de fraude" y que los subadmins vean a todos sus referidos.
+3. Lunes: primer aviso del ranking semanal por Telegram → revisar antifraude antes de "Entregar premios".
+4. Vigilar créditos de The Odds API (`diagnostico_cuotas.sh sincuota`).
+5. Casino (aplazado) y panel CEO/subadmin con el diseño nuevo (opcional).
 
 ## Decisiones de Yoel (2 oct 2026)
 
