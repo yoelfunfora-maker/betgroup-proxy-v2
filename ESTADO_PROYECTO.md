@@ -169,7 +169,7 @@ Caso: "Independiente vs Instituto" (Argentina) salía sin cuota.
 - `GET /api/admin/diagnostico-cuotas?q=<equipo>` (solo CEO) y `publicar/diagnostico_cuotas.sh` en el repo de la web: muestra competición, candidatos, parecido y créditos restantes de The Odds API.
 - Pruebas: `test/cuotas.prueba.js` (9 comprobaciones; con el código anterior fallan 5).
 
-## Etapa 8 — ranking semanal, apodo, promo y fotos sin metadatos (PREPARADA, pendiente de publicar)
+## Etapa 8 — ranking semanal, apodo, promo y fotos sin metadatos (DESPLEGADA 2 oct 2026, ~15:30 hora de Cuba)
 
 Decisiones de Yoel: ranking por TOTAL APOSTADO (saldo real) entre quienes depositan MÁS de 1000 en la semana (lunes-domingo, hora de Cuba); premios promo 500/300/100; consuelo de 100 promo a cada participante que perdió más de 500 (supuesto: también exige el depósito >1000); el CEO revisa y entrega. Promo: cuota mínima 1.50 y si gana SOLO la ganancia va al saldo real (antes: promo → promo). Apodo obligatorio y público; el nombre real nunca se muestra.
 - `lib/ranking.js` (+ `GET /api/ranking`, `GET /api/admin/ranking`, `POST /api/admin/ranking/entregar`, aviso por Telegram cada lunes, `rankingPremios/<lunes>` evita doble pago).
@@ -180,6 +180,14 @@ Decisiones de Yoel: ranking por TOTAL APOSTADO (saldo real) entre quienes deposi
 - Arreglo: la web nunca enviaba `tipoSaldo`, así que el promo no se podía usar.
 - Pruebas: `test/ranking.prueba.js` (27) y `test/etapa8.e2e.js` (11 en navegador).
 - Riesgo pendiente: los comprobantes en ImgBB son públicos para quien tenga el enlace.
+
+### Después de la Etapa 8 (2 oct 2026)
+- Botón "+ mercados": `.bg-cuotas[hidden]{display:none!important}` (display:grid anulaba hidden).
+- Alias de clubes ESPN↔The Odds API (Inter, Sporting CP, Lyon, Rennes, Brest, Atlético-MG, Athletico-PR, København, Legia) y letras ø/æ/ł/ß/đ.
+- Diagnóstico: `diagnostico_cuotas.sh sincuota` lista todos los partidos sin cuota con un `motivo` en palabras.
+- Quitados (autorizado por Yoel) 4 `<script>` a archivos inexistentes: buscador-ceo.js, google-auth.js, local-cache.js, fix_saldo.js.
+- Archivos que sí existen solo en el teléfono (copia en la rama `archivos-telefono` del repo privado): modo_cuba.js (bloqueo por IP si `config/modoCuba`), cookies.js, filtro.js, eventos.js, service-worker.js. Ninguno afecta al login.
+- **Créditos de The Odds API: 130 de 500 el 2 oct.** El plan gratis no alcanza para ~17 ligas × 3 mercados. Las cuotas se piden solo 48 h antes del partido; la web lo dice ("Las cuotas se abren 2 días antes"). Decisión pendiente de Yoel: plan de 30 $/mes o reducir ligas/mercados.
 
 ## Decisiones de Yoel (2 oct 2026)
 
