@@ -74,10 +74,26 @@ Autorizada por Yoel. Cambios en commits separados:
 | Subadmin+ | `/api/usuarios/mis-referidos` |
 | Solo CEO | `/api/admin/*`, `/api/apuestas/liquidar`, `/api/test-reporte`, `/api/debug-reporte`, `/api/estado-sistema`, `/api/agents-status`, `/api/verificacion-geminis`, `/api/huggingface/cuotas` |
 
+## Etapa 2 de dinero — 2 oct 2026 (misma rama, SIN desplegar)
+
+`lib/apuestas.js` es el único sitio que coloca y liquida apuestas:
+
+- Saldo descontado con transacción (sin doble gasto). Apuestas de un mismo usuario en cola.
+- Cuota del servidor (caché de eventos). Si el cliente manda otra → 409 con `cuotaActual`.
+- Solo eventos reales y antes de empezar (no se apuesta en vivo hasta tener cuotas en vivo de verdad).
+- `config/minBet`, `maxBet`, `maxPago`, `dailyLossLimit` y `autoexcludedUntil` comprobados en el servidor. El límite diario cuenta perdidas + pendientes del día (hora de Cuba).
+- Liquidación: pendiente → ganada/perdida/anulada en una transacción (sin doble pago entre automático y manual). Premio al mismo saldo con el que se apostó: **promo → promo** (decisión a confirmar por Yoel).
+- La liquidación cruza por `eventoId` además de por nombre. El CEO puede enviar `resultadoGanador: "ANULADA"` para devolver lo apostado.
+- Cada apuesta guarda `eventoId`, `saldoCampo`, `pago`, `pagado`, `liquidadaPor`. Las apuestas antiguas sin `saldoCampo` se pagan a `creditoReal`, como antes.
+- `npm test` ejecuta las pruebas de seguridad y de dinero (Firebase simulado).
+
+Contrato nuevo de `/api/apostar`: `{eventoId, tipo: Local|Visitante|Empate, amount, cuota (opcional, la que vio el usuario), tipoSaldo: real|promo}`. Los mercados de hándicap y totales todavía no se aceptan en el servidor (tampoco se liquidaban antes).
+
 ### Lo que la Etapa 1 NO arregla todavía
 
 - **El frontend escribe saldos y apuestas directamente en Firebase.** Mientras las reglas de RTDB lo permitan, cualquiera puede saltarse el servidor → Etapa 3 (reglas) es imprescindible.
-- Doble gasto, doble pago, cuota elegida por el cliente, promo→real → Etapa 2.
+- ~~Doble gasto, doble pago, cuota elegida por el cliente, promo→real~~ → hecho en Etapa 2 (solo para apuestas que pasen por el servidor).
+- Si el abono del premio falla justo después de marcar la apuesta como ganada, queda `pagado: false`: revisar a mano esas apuestas.
 - Registro sigue siendo del lado del cliente (puede elegir su rol) → Etapa 3.
 - Sellado RFC 3161 con TSA externa de la cadena de auditoría → pendiente.
 - `uuid` (moderada, dependencia interna de firebase-admin) sin arreglo publicado aún.
