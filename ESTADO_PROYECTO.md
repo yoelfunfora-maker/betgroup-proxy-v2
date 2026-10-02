@@ -160,7 +160,7 @@ Queja: en Cuba costaba mucho registrarse y entrar. Causas encontradas y arreglos
 - Nueva ruta `GET /api/version` → `{version:'etapa6'}` (la usa `publicar_web.sh`).
 - Pruebas: `npm test` (5 archivos, + `registro.prueba.js`), `test/navegador.e2e.js` y `test/registro.e2e.js` (9 comprobaciones en navegador con servidor dormido simulado).
 
-## Etapa 7 — cuotas de ligas con nombre "raro" en ESPN (PREPARADA, pendiente de publicar)
+## Etapa 7 — cuotas de ligas con nombre "raro" en ESPN (DESPLEGADA 2 oct 2026; verificado con diagnóstico: Independiente vs Instituto 2.47/2.97/3.21)
 
 Caso: "Independiente vs Instituto" (Argentina) salía sin cuota.
 - La competición de The Odds API se elegía por el NOMBRE de liga de ESPN. "Argentine Liga Profesional" no contiene "argentina", "Spanish LALIGA" no contiene "la liga", "Brazilian Serie A" caía en Italia... y todo acababa pidiendo `soccer_epl`. Ahora `ODDS_POR_RUTA` usa la ruta de ESPN (`soccer/arg.1` → `soccer_argentina_primera_division`); liga desconocida → no se pide nada (ahorra créditos).
@@ -168,6 +168,18 @@ Caso: "Independiente vs Instituto" (Argentina) salía sin cuota.
 - Nombres: "Instituto" ⊂ "Instituto de Córdoba", "CA Independiente" = "Independiente" (palabras vacías fuera), siempre exigiendo los dos equipos y la misma hora (±3 h). Se elige la mejor coincidencia, no la primera.
 - `GET /api/admin/diagnostico-cuotas?q=<equipo>` (solo CEO) y `publicar/diagnostico_cuotas.sh` en el repo de la web: muestra competición, candidatos, parecido y créditos restantes de The Odds API.
 - Pruebas: `test/cuotas.prueba.js` (9 comprobaciones; con el código anterior fallan 5).
+
+## Etapa 8 — ranking semanal, apodo, promo y fotos sin metadatos (PREPARADA, pendiente de publicar)
+
+Decisiones de Yoel: ranking por TOTAL APOSTADO (saldo real) entre quienes depositan MÁS de 1000 en la semana (lunes-domingo, hora de Cuba); premios promo 500/300/100; consuelo de 100 promo a cada participante que perdió más de 500 (supuesto: también exige el depósito >1000); el CEO revisa y entrega. Promo: cuota mínima 1.50 y si gana SOLO la ganancia va al saldo real (antes: promo → promo). Apodo obligatorio y público; el nombre real nunca se muestra.
+- `lib/ranking.js` (+ `GET /api/ranking`, `GET /api/admin/ranking`, `POST /api/admin/ranking/entregar`, aviso por Telegram cada lunes, `rankingPremios/<lunes>` evita doble pago).
+- `lib/apuestas.js`: `reglaPromo: 'ganancia-a-real'` en apuestas promo nuevas; las antiguas pendientes siguen la regla vieja. `config/promoCuotaMinima` (por defecto 1.5).
+- Apodo: `apodos/<clave>` = uid (único, sin el nombre real, cambio 1 vez/semana), `POST /api/perfil/apodo`; campos protegidos en `/api/db`.
+- Fotos: la web redibuja la foto (sin EXIF/GPS) y `POST /api/imagen` la limpia otra vez en memoria (`lib/imagenes.js`) y la sube con `IMGBB_API_KEY` (opcional en Render; sin ella, plan B directo ya sin metadatos).
+- Créditos de The Odds API: copia en Firebase `cacheCuotas/` (Render ya no repaga al despertar) y solo ligas con partidos en 48 h. El 2 oct quedaban 146 de 500.
+- Arreglo: la web nunca enviaba `tipoSaldo`, así que el promo no se podía usar.
+- Pruebas: `test/ranking.prueba.js` (27) y `test/etapa8.e2e.js` (11 en navegador).
+- Riesgo pendiente: los comprobantes en ImgBB son públicos para quien tenga el enlace.
 
 ## Decisiones de Yoel (2 oct 2026)
 

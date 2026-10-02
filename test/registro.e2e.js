@@ -84,6 +84,7 @@ const PNG = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR
 
     // Dato mal escrito: el aviso sale en el propio formulario y señala el campo.
     await pagina.fill('#rNombre', 'Yoel Prueba');
+    await pagina.fill('#rApodo', 'Cometa_21');
     await pagina.fill('#rTel', '5351234567');
     await pagina.fill('#rEmail', 'yoel-sin-arroba');
     await pagina.fill('#rPass', 'clave-segura-1');
