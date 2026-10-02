@@ -7,6 +7,7 @@ const {
   corsRestringido, cabecerasSeguras, idPeticion, limitador,
   responderError, manejadorErrores, rutaNoEncontrada
 } = require('./lib/seguridad');
+const { crearAuditoria } = require('./lib/auditoria');
 
 const app = express();
 const PORT = config.puerto;
@@ -60,6 +61,9 @@ try {
   console.error('Error al inicializar Firebase Admin SDK:', error.message);
   process.exit(1);
 }
+
+// Registro de auditoría encadenado y firmado (ver lib/auditoria.js).
+const auditoria = crearAuditoria(db, config.auditoriaSecreto);
 
 // ==================== CACHÉ ====================
 
