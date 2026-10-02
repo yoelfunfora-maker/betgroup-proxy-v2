@@ -189,7 +189,7 @@ Decisiones de Yoel: ranking por TOTAL APOSTADO (saldo real) entre quienes deposi
 - Archivos que sí existen solo en el teléfono (copia en la rama `archivos-telefono` del repo privado): modo_cuba.js (bloqueo por IP si `config/modoCuba`), cookies.js, filtro.js, eventos.js, service-worker.js. Ninguno afecta al login.
 - **Créditos de The Odds API: 130 de 500 el 2 oct.** El plan gratis no alcanza para ~17 ligas × 3 mercados. Las cuotas se piden solo 48 h antes del partido; la web lo dice ("Las cuotas se abren 2 días antes"). Decisión pendiente de Yoel: plan de 30 $/mes o reducir ligas/mercados.
 
-## Etapa 9 — más partidos con cuota, gratis (2 oct 2026)
+## Etapa 9 — más partidos con cuota, gratis (DESPLEGADA 2 oct 2026; web publicada 16:36, copia en publico.bak_20261002_163603)
 
 Decisión de Yoel: seguir gratis (el sistema aún no da ganancia). Yoel usa 3-4 claves de The Odds API en cuentas distintas por franja horaria; se le advirtió que sus términos lo prohíben y pueden cerrarlas todas. No se amplió esa rotación.
 - Regresión de la Etapa 8 corregida: el horizonte de 48 h dejaba sin cuota la jornada siguiente. Ahora 8 días; copia de 12 h si la liga juega en 48 h, 24 h si no.
