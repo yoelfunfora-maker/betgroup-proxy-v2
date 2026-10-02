@@ -1081,6 +1081,15 @@ app.post('/api/admin/reiniciar', soloCEO, async (req, res) => {
 });
 // ==================== FIN REINICIO ====================
 
+// ==================== VERIFICAR CADENA DE AUDITORÍA ====================
+app.get('/api/admin/auditoria/verificar', soloCEO, async (req, res) => {
+  try {
+    res.json(await auditoria.verificarCadena());
+  } catch (err) {
+    responderError(res, req, err, '/api/admin/auditoria/verificar');
+  }
+});
+
 
 
 // ==================== REFERIDOS FILTRADOS POR SUBADMIN ====================
