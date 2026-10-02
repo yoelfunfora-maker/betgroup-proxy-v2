@@ -6,7 +6,7 @@ const { getDatabase } = require('firebase-admin/database');
 const axios = require('axios');
 const config = require('./lib/config');
 const {
-  corsRestringido, cabecerasSeguras, idPeticion, limitador,
+  corsRestringido, cabecerasSeguras, idPeticion, ipCliente, limitador,
   responderError, manejadorErrores, rutaNoEncontrada
 } = require('./lib/seguridad');
 const { crearAuditoria } = require('./lib/auditoria');
@@ -605,6 +605,11 @@ app.get('/api/ping', (req, res) => {
   res.json({ ok: true, timestamp: Date.now() });
 });
 
+// Versión del servidor: el script de publicación espera a que Render tenga esta antes de subir la web.
+app.get('/api/version', (req, res) => {
+  res.json({ version: 'etapa6' });
+});
+
 app.get('/api/health', (req, res) => {
   res.json({ 
     status: 'online', 
@@ -623,9 +628,9 @@ const limiteLogin = limitador({
 app.post('/api/auth/login', limiteLogin, auth.login);
 
 // Límites por usuario para lo que gasta cuotas de APIs de pago.
-const porUsuario = (req) => (req.usuario ? `u:${req.usuario.uid}` : `ip:${req.ip}`);
+const porUsuario = (req) => (req.usuario ? `u:${req.usuario.uid}` : `ip:${ipCliente(req)}`);
 const limiteIA = limitador({ ventanaMs: 60 * 1000, maximo: 10, clave: porUsuario });
-const limiteAvisos = limitador({ ventanaMs: 60 * 1000, maximo: 10, clave: (req) => `aviso:${req.usuario ? req.usuario.uid : req.ip}` });
+const limiteAvisos = limitador({ ventanaMs: 60 * 1000, maximo: 10, clave: (req) => `aviso:${req.usuario ? req.usuario.uid : ipCliente(req)}` });
 const limiteApuestas = limitador({ ventanaMs: 60 * 1000, maximo: 20, clave: porUsuario });
 const soloCEO = [requerirSesion, requerirNivel(NIVEL.CEO)];
 const directorOMas = [requerirSesion, requerirNivel(DIRECTOR)];
@@ -667,12 +672,18 @@ function operacion(fn) {
     }
   };
 }
-const limiteRegistro = limitador({ ventanaMs: 60 * 60 * 1000, maximo: 5, mensaje: 'Demasiados intentos. Prueba en una hora.' });
+// Registro: solo cuentan los intentos fallidos (20 por hora e IP). En Cuba muchísima gente
+// sale a Internet por la misma IP de ETECSA; un registro correcto no gasta el cupo de nadie.
+const limiteRegistro = limitador({
+  ventanaMs: 60 * 60 * 1000, maximo: 20, soloFallos: true,
+  mensaje: 'Demasiados intentos fallidos desde tu conexión. Espera una hora o pide ayuda a quien te invitó.'
+});
+const limiteRecuperar = limitador({ ventanaMs: 60 * 60 * 1000, maximo: 10, mensaje: 'Demasiadas solicitudes. Prueba en una hora.' });
 app.post('/api/auth/registro', limiteRegistro, operacion((req) => operaciones.registrar(req)));
-app.post('/api/auth/recuperar', limiteRegistro, operacion((req) => operaciones.solicitarRecuperacion(req)));
+app.post('/api/auth/recuperar', limiteRecuperar, operacion((req) => operaciones.solicitarRecuperacion(req)));
 
 // ==================== BASE DE DATOS A TRAVÉS DEL SERVIDOR ====================
-const limiteDb = limitador({ ventanaMs: 60 * 1000, maximo: 300, clave: (req) => `db:${req.usuario ? req.usuario.uid : req.ip}` });
+const limiteDb = limitador({ ventanaMs: 60 * 1000, maximo: 300, clave: (req) => `db:${req.usuario ? req.usuario.uid : ipCliente(req)}` });
 app.post('/api/db', requerirSesion, limiteDb, proxyDb.manejar);
 
 app.get('/api/fixtures', async (req, res) => {
