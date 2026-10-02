@@ -24,6 +24,7 @@ function idToken(datos) {
   return f + '.' + crypto.sign('RSA-SHA256', Buffer.from(f), privateKey).toString('base64url');
 }
 const TOKEN = idToken({ sub: '5550001', email: 'maria.cuba@gmail.com', name: 'María <b>Pérez</b>' });
+const TOKEN_VINCULO = idToken({ sub: '6660001', email: 'persona.web2@gmail.com', name: 'Persona Web 2' });
 
 set('codigosAcceso/GG-1', { code: 'GG-1', createdBy: 'BG_ag', generadoPor: 'BG_ag', usado: false, rol: 'member' });
 set('codigosAcceso/TT-1', { code: 'TT-1', createdBy: 'BG_ag', usado: false, rol: 'member' });
@@ -43,7 +44,8 @@ global.fetch = async (url, op) => {
 
 // Scripts falsos de Google (botón que devuelve el token) y de Cloudflare (casilla que se marca sola).
 const GSI = `window.google={accounts:{id:{_cb:null,initialize:function(o){this._cb=o.callback;window.__gsiCliente=o.client_id;},
-  renderButton:function(el){var b=document.createElement('button');b.id='botonGoogleFalso';b.textContent='Continuar con Google';var s=this;b.onclick=function(){s._cb({credential:${JSON.stringify(TOKEN)}});};el.appendChild(b);}}}};`;
+  prompt:function(){window.__gsiPrompt=(window.__gsiPrompt||0)+1;},cancel:function(){},
+  renderButton:function(el){var b=document.createElement('button');b.id='botonGoogleFalso';b.textContent='Continuar con Google';var s=this;b.onclick=function(){s._cb({credential:window.__tokenGoogle||${JSON.stringify(TOKEN)}});};el.appendChild(b);}}}};`;
 const TURN = `window.turnstile={render:function(el,o){var d=document.createElement('div');d.id='casillaFalsa';d.textContent='✓ No soy un robot';el.appendChild(d);setTimeout(function(){o.callback('humano-ok');},50);return 'w1';},reset:function(){window.__turnReset=(window.__turnReset||0)+1;}};`;
 
 const TIPOS = { '.webp': 'image/webp', '.js': 'text/javascript', '.woff2': 'font/woff2', '.png': 'image/png', '.json': 'application/json' };
@@ -56,13 +58,14 @@ http.createServer((req, res) => {
 
 async function nuevaPagina(navegador, { externosCaidos = false } = {}) {
   const pagina = await navegador.newPage({ viewport: { width: 400, height: 860 } });
+  pagina.red = { caidos: externosCaidos }; // se puede cambiar en mitad de la prueba (vuelve la conexión)
   pagina.erroresJs = [];
   pagina.on('pageerror', (e) => pagina.erroresJs.push(e.message));
   pagina.on('dialog', (d) => d.accept());
   await pagina.route('**/*', async (ruta) => {
     const req = ruta.request(); const url = req.url();
-    if (url.startsWith('https://accounts.google.com/gsi/client')) return externosCaidos ? ruta.abort() : ruta.fulfill({ status: 200, contentType: 'text/javascript', body: GSI });
-    if (url.startsWith('https://challenges.cloudflare.com/turnstile/')) return externosCaidos ? ruta.abort() : ruta.fulfill({ status: 200, contentType: 'text/javascript', body: TURN });
+    if (url.startsWith('https://accounts.google.com/gsi/client')) return pagina.red.caidos ? ruta.abort() : ruta.fulfill({ status: 200, contentType: 'text/javascript', body: GSI });
+    if (url.startsWith('https://challenges.cloudflare.com/turnstile/')) return pagina.red.caidos ? ruta.abort() : ruta.fulfill({ status: 200, contentType: 'text/javascript', body: TURN });
     if (url.startsWith(API_REAL)) {
       const cors = { 'access-control-allow-origin': '*', 'access-control-allow-headers': 'Content-Type, Authorization', 'access-control-allow-methods': 'GET, POST' };
       if (req.method() === 'OPTIONS') return ruta.fulfill({ status: 204, headers: cors });
@@ -129,7 +132,28 @@ async function registrar(pagina, i, codigo) {
     ok(await pagina.isHidden('#bgTurnstile'), 'si Cloudflare no carga, no aparece una casilla rota');
     await pagina.click('#btnRegistro');
     await pagina.waitForSelector('#app', { state: 'visible', timeout: 30000 });
-    ok(Object.values(get('users')).some(x => x.email === 'web2@nauta.cu'), 'y la persona se registra igual con su código de invitación');
+    const web2 = Object.values(get('users')).find(x => x.email === 'web2@nauta.cu');
+    ok(web2, 'y la persona se registra igual con su código de invitación');
+
+    // ---- Vuelve la conexión: la app detecta Google y ofrece vincularlo ----
+    await pagina.waitForTimeout(13000); // primer intento tras entrar: Google sigue caído
+    ok(!(await pagina.$('#bgVincularGoogle')), 'mientras Google no responde, no se ofrece nada');
+    pagina.red.caidos = false;
+    await pagina.evaluate(() => window.dispatchEvent(new Event('online')));
+    await pagina.waitForSelector('#bgVincularGoogle #botonGoogleFalso', { timeout: 20000 });
+    ok(await pagina.evaluate(() => window.__gsiPrompt >= 1), 'al volver la conexión la app lo detecta sola: ofrece "Continuar como…" y muestra la tarjeta');
+    const capa = await pagina.textContent('#bgVincularGoogle');
+    ok(/obligatorio/.test(capa) && !/Ahora no/.test(capa) && /Cerrar sesión/.test(capa), 'es OBLIGATORIO: sin "Ahora no"; la única salida es cerrar sesión');
+    const tapa = await pagina.evaluate(() => { const r = document.getElementById('bgVincularGoogle').getBoundingClientRect(); return r.width >= innerWidth - 1 && r.height >= innerHeight - 1; });
+    ok(tapa, 'la pantalla tapa toda la app hasta vincular');
+    await pagina.screenshot({ path: path.join(__dirname, 'captura-vincular-google.png') });
+    await pagina.evaluate((t) => { window.__tokenGoogle = t; }, TOKEN_VINCULO);
+    await pagina.click('#bgVincularGoogle #botonGoogleFalso');
+    await pagina.waitForFunction(() => /Google vinculado/.test(document.getElementById('toast').textContent), null, { timeout: 15000 });
+    ok(get(`users/${web2.uid}/googleSub`) === '6660001' && !(await pagina.$('#bgVincularGoogle')), 'con un toque su cuenta queda vinculada a Google y la tarjeta desaparece');
+    const [sV, jV] = await (async () => { const r = await fetchReal(`http://127.0.0.1:${PUERTO_API}/api/auth/google`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ credential: TOKEN_VINCULO }) }); return [r.status, await r.json()]; })();
+    ok(sV === 200 && jV.usuario.uid === web2.uid, 'desde ahora entra con Google a su misma cuenta (mismo saldo, mismo agente)');
+    ok(!pagina.erroresJs.length, 'sin errores de JavaScript → ' + (pagina.erroresJs.join(' | ') || 'ninguno'));
   } catch (e) {
     ok(false, 'excepción: ' + e.message.split('\n')[0]);
     if (pagina) await pagina.screenshot({ path: path.join(__dirname, 'fallo-google.png') });

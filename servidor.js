@@ -1067,6 +1067,33 @@ app.post('/api/auth/registro', limiteRegistroGlobal, limiteRegistro, revisarTurn
   return r;
 }));
 
+// Vincular Google a una cuenta que YA entró (con contraseña). Lo ofrece la web sola cuando detecta
+// que Google carga en ese móvil; la persona confirma con un toque (Google no permite hacerlo en
+// silencio, y así nadie vincula la cuenta de Google de otro). Un vínculo por persona y por cuenta.
+const limiteVincular = limitador({ ventanaMs: 60 * 60 * 1000, maximo: 20, soloFallos: true, mensaje: 'Demasiados intentos. Prueba en una hora.' });
+app.post('/api/auth/google/vincular', requerirSesion, limiteVincular, async (req, res) => {
+  try {
+    const g = await verificadorGoogle.verificar(req.body?.credential);
+    const uid = req.usuario.uid;
+    const actual = (await db.ref(`users/${uid}/googleSub`).once('value')).val();
+    if (actual && actual !== g.sub) return res.status(409).json({ error: 'Tu cuenta ya está vinculada a otra cuenta de Google' });
+    let libre = false;
+    // Reserva atómica del vínculo (primera pasada con null: se devuelve el valor y Firebase relee el real).
+    await db.ref(`googleCuentas/${g.sub}`).transaction((v) => {
+      libre = false;
+      if (v === null || (v && v.uid === uid)) { libre = true; return { uid, vinculadaEn: (v && v.vinculadaEn) || Date.now() }; }
+      return undefined;
+    });
+    if (!libre) return res.status(409).json({ error: 'Esa cuenta de Google ya está vinculada a otro usuario' });
+    await db.ref(`users/${uid}/googleSub`).set(g.sub);
+    if (!actual) await auditoria.registrarSeguro({ accion: 'cuenta_google_vinculada', actor: uid, requestId: req.id, detalles: { desde: 'sesion' } });
+    return res.json({ success: true, vinculada: true, correoGoogle: g.email });
+  } catch (err) {
+    if (err instanceof ErrorAcceso) return res.status(err.estado).json({ error: err.message });
+    return responderError(res, req, err, req.path);
+  }
+});
+
 // Entrar o registrarse con Google. El navegador manda el ID token de Google (credential).
 //  - Cuenta ya vinculada → entra.
 //  - Correo @gmail.com que ya tiene cuenta → se vincula y entra (Google es dueño de ese buzón).

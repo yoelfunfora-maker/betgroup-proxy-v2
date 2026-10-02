@@ -91,6 +91,27 @@ const persona = (i, extra = {}) => ({ nombre: `Persona ${i}`, telefono: `5354${S
     [s] = await llamar('POST', '/api/db', { op: 'leer', ruta: 'googleCuentas' }, (await llamar('POST', '/api/auth/google', { credential: tNuevo }))[1].token);
     ok(s === 403, 'la tabla de vínculos con Google no se puede leer desde el navegador');
 
+    // ---- Vincular Google a una cuenta que ya entró con contraseña ----
+    set('users/BG_pass', { uid: 'BG_pass', email: 'pass@nauta.cu', activo: true, nombre: 'Con Clave', rol: 'member', rolLevel: 1, creditoReal: 0, creditoPromo: 0 });
+    set('credenciales_acceso/pass-nauta-cu', { email: 'pass@nauta.cu', uid: 'BG_pass', salt: '0a0b0c0d', hash: crypto.createHash('sha256').update('clave-1234' + '0a0b0c0d' + 'BetGroup-S3cr3t0-2026').digest('hex') });
+    const tP = (await llamar('POST', '/api/auth/login', { identificador: 'pass@nauta.cu', password: 'clave-1234' }))[1].token;
+    [s] = await llamar('POST', '/api/auth/google/vincular', { credential: idToken({ sub: '777777', email: 'otra@gmail.com' }) });
+    ok(s === 401, 'sin sesión no se puede vincular nada');
+    [s, j] = await llamar('POST', '/api/auth/google/vincular', { credential: idToken({ sub: '777777', email: 'su.gmail@gmail.com' }) }, tP);
+    ok(s === 200 && get('users/BG_pass/googleSub') === '777777' && get('googleCuentas/777777/uid') === 'BG_pass', 'con sesión abierta, un toque vincula su Google a su cuenta');
+    [s, j] = await llamar('POST', '/api/auth/google', { credential: idToken({ sub: '777777', email: 'su.gmail@gmail.com' }) });
+    ok(s === 200 && j.usuario.uid === 'BG_pass', 'desde entonces entra con Google a su cuenta de siempre');
+    [s] = await llamar('POST', '/api/auth/google/vincular', { credential: idToken({ sub: '777777', email: 'su.gmail@gmail.com' }) }, tP);
+    ok(s === 200, 'repetir el vínculo no da error');
+    [s, j] = await llamar('POST', '/api/auth/google/vincular', { credential: idToken({ sub: '888888', email: 'otra.mas@gmail.com' }) }, tP);
+    ok(s === 409 && get('users/BG_pass/googleSub') === '777777', 'no se cambia a otra cuenta de Google sin control');
+    [s, j] = await llamar('POST', '/api/auth/google/vincular', { credential: tNuevo }, tP);
+    ok(s === 409 && get('googleCuentas/111111/uid') === uidN, 'no puede apropiarse del Google de otra persona');
+    [s] = await llamar('POST', '/api/auth/google/vincular', { credential: idToken({ sub: '999999', email: 'x@gmail.com' }, { clave: otra.privateKey }) }, tP);
+    ok(s === 401, 'token falsificado al vincular: rechazado');
+    [s] = await llamar('POST', '/api/db', { op: 'escribir', ruta: 'users/BG_pass/googleSub', valor: '123' }, tP);
+    ok(s === 403, 'el vínculo no se puede tocar por la vía genérica /api/db');
+
     // ---- Cloudflare Turnstile en el registro normal ----
     [s, j] = await llamar('POST', '/api/auth/registro', persona(1, { turnstile: 'bot-falso' }));
     ok(s === 400 && /persona/.test(j.error), 'Cloudflare dice que es un robot: registro rechazado → ' + j.error);
