@@ -81,8 +81,10 @@ setTimeout(async()=>{
   const total=tres.reduce((a,[s,j])=>a+(j.liquidadas||0),0);
   const ganLocal=Math.round(100*q*100)/100;
   ok(total===Object.keys(get('apuestas/BG_ana')).length,'3 liquidaciones simultáneas: cada apuesta se liquida 1 vez ('+total+')');
-  ok(get('users/BG_ana/creditoReal')===Math.round((real0+ganLocal)*100)/100,'premio real pagado una sola vez: '+real0+' → '+get('users/BG_ana/creditoReal'));
-  ok(get('users/BG_ana/creditoPromo')===Math.round((promo0+ganLocal)*100)/100,'promo: la ganada (100) cobra '+ganLocal+' en creditoPromo, la perdida (200) nada: '+promo0+' → '+get('users/BG_ana/creditoPromo'));
+  // Regla de la Etapa 8: la apuesta promo ganada (100) paga SOLO su ganancia, y al saldo real.
+  const gananciaPromo=Math.round(100*(q-1)*100)/100;
+  ok(get('users/BG_ana/creditoReal')===Math.round((real0+ganLocal+gananciaPromo)*100)/100,'premio real pagado una sola vez + ganancia de la promo al real: '+real0+' → '+get('users/BG_ana/creditoReal'));
+  ok(get('users/BG_ana/creditoPromo')===promo0,'promo: la ganada no devuelve nada al promo (se consume) y la perdida tampoco: '+promo0+' → '+get('users/BG_ana/creditoPromo'));
   const aps=Object.values(get('apuestas/BG_ana'));
   ok(aps.every(a=>a.estado!=='pendiente' && a.pagado===true),'todas liquidadas y marcadas como pagadas');
   [s,j]=await call('POST','/api/apuestas/liquidar',{partidoId:'777',resultadoGanador:'Visitante'},tJefe); ok(j.liquidadas===0,'re-liquidar con otro resultado no cambia nada');
