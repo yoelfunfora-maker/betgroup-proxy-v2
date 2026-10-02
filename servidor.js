@@ -4,11 +4,100 @@ const https = require('https');
 const admin = require('firebase-admin');
 const axios = require('axios');
 
+const crypto = require('crypto');
+const { limpiarMetadatos } = require('./limpiarMetadatos');
+
 const app = express();
 const PORT = process.env.PORT || 3000;
 
+app.disable('x-powered-by');
 app.use(cors());
-app.use(express.json());
+// Las rutas con imágenes llevan su propio límite de tamaño más abajo
+const jsonPorDefecto = express.json({ limit: '100kb' });
+app.use((req, res, next) => (req.path === '/api/subir-imagen' ? next() : jsonPorDefecto(req, res, next)));
+
+// Cabeceras básicas de seguridad en todas las respuestas
+app.use((req, res, next) => {
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  res.setHeader('X-Frame-Options', 'DENY');
+  res.setHeader('Referrer-Policy', 'no-referrer');
+  next();
+});
+
+// ==================== CANDADO DE ADMINISTRADOR ====================
+// Las rutas de administración exigen la cabecera "x-admin-key" igual a ADMIN_API_KEY.
+// Si ADMIN_API_KEY no está configurada, las rutas quedan CERRADAS (nunca abiertas).
+const ADMIN_API_KEY = process.env.ADMIN_API_KEY || '';
+const SELF_URL = (process.env.SELF_URL || 'https://betgroup-proxy-v2-8vqj.onrender.com').replace(/\/+$/, '');
+
+function huella(valor) {
+  return crypto.createHash('sha256').update(String(valor)).digest();
+}
+
+function requireAdmin(req, res, next) {
+  if (!ADMIN_API_KEY) {
+    return res.status(503).json({ error: 'Ruta de administración desactivada' });
+  }
+  const enviada = req.get('x-admin-key') || '';
+  // Comparación en tiempo constante para no filtrar la clave por tiempos de respuesta
+  if (!crypto.timingSafeEqual(huella(enviada), huella(ADMIN_API_KEY))) {
+    return res.status(401).json({ error: 'No autorizado' });
+  }
+  next();
+}
+
+// ==================== LÍMITE DE PETICIONES (por IP, en memoria) ====================
+const contadoresPeticiones = new Map();
+
+function limitarPeticiones(maximo, ventanaMs) {
+  return (req, res, next) => {
+    const clave = req.path + '|' + (req.get('x-forwarded-for') || req.ip || '').split(',')[0].trim();
+    const ahora = Date.now();
+    const entrada = contadoresPeticiones.get(clave);
+    if (!entrada || ahora - entrada.inicio > ventanaMs) {
+      contadoresPeticiones.set(clave, { inicio: ahora, cuenta: 1 });
+      return next();
+    }
+    entrada.cuenta++;
+    if (entrada.cuenta > maximo) {
+      return res.status(429).json({ error: 'Demasiadas peticiones, espera un momento' });
+    }
+    next();
+  };
+}
+
+// Limpieza periódica para que el mapa no crezca sin límite
+setInterval(() => {
+  const ahora = Date.now();
+  for (const [clave, entrada] of contadoresPeticiones) {
+    if (ahora - entrada.inicio > 10 * 60 * 1000) contadoresPeticiones.delete(clave);
+  }
+}, 5 * 60 * 1000).unref();
+
+// Los UID de Firebase solo llevan letras, números, guion y guion bajo
+const UID_VALIDO = /^[A-Za-z0-9_-]{10,128}$/;
+
+// ==================== NOTIFICACIÓN DE ERRORES A TELEGRAM ====================
+// Las claves se leen de las variables de entorno de Render (nunca escritas en el código)
+const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN || '';
+const TELEGRAM_CHAT_ID = process.env.TELEGRAM_CHAT_ID || '';
+
+function notifyTelegram(texto) {
+  if (!TELEGRAM_BOT_TOKEN || !TELEGRAM_CHAT_ID) return;
+  const url = `https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage`;
+  require('https').get(`${url}?chat_id=${TELEGRAM_CHAT_ID}&text=${encodeURIComponent(texto)}`).on('error', () => {});
+}
+
+process.on('uncaughtException', (err) => {
+  console.error('❌ Error no capturado:', err.message);
+  notifyTelegram(`🚨 BetGroup Proxy ERROR: ${err.message}\n\nStack: ${err.stack?.substring(0, 300) || 'sin stack'}`);
+});
+
+process.on('unhandledRejection', (reason) => {
+  console.error('❌ Promesa rechazada:', reason);
+  notifyTelegram(`⚠️ BetGroup Proxy PROMESA RECHAZADA: ${reason?.message || reason}`);
+});
+// ==================== FIN NOTIFICACIÓN TELEGRAM ====================
 
 // ==================== FIREBASE ====================
 
@@ -30,28 +119,7 @@ try {
   
   console.log('✅ Firebase Admin SDK inicializado');
 
-// Claves de agentes (si no están en variables de entorno)
 
-
-// ==================== NOTIFICACIÓN DE ERRORES A TELEGRAM ====================
-const TELEGRAM_BOT_TOKEN = '8671464180:AAHhu_Ct9-3Q6Arjle-7Xy4DyUGuuNvraBs';
-const TELEGRAM_CHAT_ID = '-5154764705';
-
-function notifyTelegram(texto) {
-  const url = `https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage`;
-  require('https').get(`${url}?chat_id=${TELEGRAM_CHAT_ID}&text=${encodeURIComponent(texto)}`).on('error', () => {});
-}
-
-process.on('uncaughtException', (err) => {
-  console.error('❌ Error no capturado:', err.message);
-  notifyTelegram(`🚨 BetGroup Proxy ERROR: ${err.message}\n\nStack: ${err.stack?.substring(0, 300) || 'sin stack'}`);
-});
-
-process.on('unhandledRejection', (reason) => {
-  console.error('❌ Promesa rechazada:', reason);
-  notifyTelegram(`⚠️ BetGroup Proxy PROMESA RECHAZADA: ${reason?.message || reason}`);
-});
-// ==================== FIN NOTIFICACIÓN TELEGRAM ====================
 
 
   db = admin.database();
@@ -77,17 +145,17 @@ function setCache(key, data) {
 
 // ==================== API KEYS ====================
 
-const ODDS_API_KEY_1 = process.env.ODDS_API_KEY_1 || '';
-const ODDS_API_KEY_2 = process.env.ODDS_API_KEY_2 || '';
+// ODDS_API_KEYS: lista separada por comas (admite 3, 4 o más claves)
+const ODDS_API_KEYS = (process.env.ODDS_API_KEYS || '')
+  .split(',').map(k => k.trim()).filter(Boolean);
+const GEMINI_API_KEY = process.env.GEMINI_API_KEY || '';
+const GROQ_API_KEY = process.env.GROQ_API_KEY || '';
 
+// Rota la clave según la hora del día, repartiendo el día entre las claves disponibles
 function getApiKey() {
-  const hour = new Date().getHours();
-  // KEY1: horas 0-7 (medianoche a 8am)
-  if (hour < 8)  return 'c56f6c464ebd4fb634c495a2c2488610';
-  // KEY2: horas 8-15 (8am a 4pm)
-  if (hour < 16) return 'e18abd8956512f34027f0ac3f87fbe52';
-  // KEY3: horas 16-23 (4pm a medianoche)
-  return '0e31c3149f0afbb009491a0cd80169f4';
+  if (ODDS_API_KEYS.length === 0) return '';
+  const tramo = Math.floor(new Date().getHours() * ODDS_API_KEYS.length / 24);
+  return ODDS_API_KEYS[tramo];
 }
 
 // ==================== ESPN FETCH ====================
@@ -408,11 +476,7 @@ async function enriquecerConCuotas(eventos) {
         // MMA solo tiene h2h, los demás tienen spreads y totals también
         const mkts = sportKey === 'mma_mixed_martial_arts' ? 'h2h' : 'h2h,spreads,totals';
         // Intentar con múltiples claves si la primera falla (ej. 401 para MMA)
-        const apiKeys = [
-          'c56f6c464ebd4fb634c495a2c2488610',
-          'e18abd8956512f34027f0ac3f87fbe52',
-          '0e31c3149f0afbb009491a0cd80169f4'
-        ];
+        const apiKeys = ODDS_API_KEYS;
         let success = false;
         for (const key of apiKeys) {
           try {
@@ -425,7 +489,7 @@ async function enriquecerConCuotas(eventos) {
               break;
             }
           } catch(innerErr) {
-            console.warn(`  Clave falló: ${key.slice(0,10)}... (${innerErr.message})`);
+            console.warn(`  Clave falló: ${key.slice(0,4)}… (${innerErr.message})`);
             continue;
           }
         }
@@ -664,28 +728,39 @@ app.get('/api/fixtures', async (req, res) => {
     await precalentarCache();
   } catch(err) {
     console.error('Error /api/fixtures:', err);
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: 'Error interno' });
   }
 });
 
-app.post('/api/apostar', async (req, res) => {
-  const { uid, amount, evento, tipo, cuota, tipoSaldo } = req.body;
-  if (!uid || !amount || !evento || !tipo || !cuota) {
-    return res.status(400).json({ error: 'Parámetros faltantes' });
+app.post('/api/apostar', requireAdmin, async (req, res) => {
+  const { uid, evento, tipo, tipoSaldo } = req.body || {};
+  const amount = Number(req.body?.amount);
+  const cuota = Number(req.body?.cuota);
+  // Monto positivo y cuota mayor que 1: un monto negativo antes SUMABA saldo
+  if (typeof uid !== 'string' || !UID_VALIDO.test(uid) ||
+      typeof evento !== 'string' || evento.length === 0 || evento.length > 200 ||
+      typeof tipo !== 'string' || tipo.length === 0 || tipo.length > 50 ||
+      !Number.isFinite(amount) || amount <= 0 ||
+      !Number.isFinite(cuota) || cuota <= 1 || cuota > 1000) {
+    return res.status(400).json({ error: 'Parámetros inválidos' });
   }
   const saldoCampo = (tipoSaldo === 'promo') ? 'creditoPromo' : 'creditoReal';
   try {
-    const snap = await db.ref(`users/${uid}/${saldoCampo}`).once('value');
-    const saldoActual = snap.val();
-    if (saldoActual === null || saldoActual < amount) {
-      return res.status(400).json({
-        error: 'Saldo insuficiente',
-        saldoActual: saldoActual || 0
-      });
+    // Transacción atómica: dos apuestas simultáneas ya no pueden gastar el mismo saldo
+    let saldoInsuficiente = false;
+    const resultado = await db.ref(`users/${uid}/${saldoCampo}`).transaction(actual => {
+      if (actual === null || typeof actual !== 'number' || actual < amount) {
+        saldoInsuficiente = true;
+        return; // aborta sin tocar el saldo
+      }
+      saldoInsuficiente = false;
+      return actual - amount;
+    });
+    if (!resultado.committed || saldoInsuficiente) {
+      return res.status(400).json({ error: 'Saldo insuficiente' });
     }
-    const saldoNuevo = saldoActual - amount;
-    await db.ref(`users/${uid}/${saldoCampo}`).set(saldoNuevo);
-    const betId = Date.now().toString();
+    const saldoNuevo = resultado.snapshot.val();
+    const betId = db.ref(`apuestas/${uid}`).push().key;
     await db.ref(`apuestas/${uid}/${betId}`).set({
       eventoNombre: evento,
       tipo: tipo,
@@ -699,7 +774,7 @@ app.post('/api/apostar', async (req, res) => {
     res.json({ success: true, saldoNuevo, betId });
   } catch(err) {
     console.error('Error /api/apostar:', err);
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: 'Error interno' });
   }
 });
 
@@ -708,10 +783,10 @@ app.post('/api/apostar', async (req, res) => {
 
 // ==================== ENDPOINT SALDO REAL ====================
 
-app.get('/api/saldo/:uid', async (req, res) => {
+app.get('/api/saldo/:uid', limitarPeticiones(60, 60 * 1000), async (req, res) => {
   const { uid } = req.params;
 
-  if (!uid || uid.length < 10) {
+  if (!UID_VALIDO.test(uid || '')) {
     return res.status(400).json({ error: 'UID inválido' });
   }
 
@@ -730,7 +805,7 @@ app.get('/api/saldo/:uid', async (req, res) => {
     });
   } catch (err) {
     console.error('Error /api/saldo:', err.message);
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: 'Error interno' });
   }
 });
 
@@ -740,26 +815,7 @@ app.get('/api/saldo/:uid', async (req, res) => {
 
 
 
-// ==================== ENDPOINT HF CUOTAS (sin bartender) ====================
-app.post('/api/huggingface/cuotas', async (req, res) => {
-  const { prompt, modelo } = req.body;
-  if (!prompt) return res.status(400).json({ error: 'Falta prompt' });
-  const model = modelo || HF_MODELS.analisis;
-  try {
-    const resp = { ok: true };
-    const _cfReply1 = await callCF([{ role: 'user', content: prompt }], 'analisis');
-    const resp1_data = { choices: [{ message: { content: _cfReply1 } }] };
-    const data = await resp.json();
-    const reply = data && data.choices && data.choices[0] && data.choices[0].message
-      ? data.choices[0].message.content
-      : JSON.stringify(data);
-    res.json({ reply: reply, model: model });
-  } catch(err) {
-    console.error('Error /api/huggingface/cuotas:', err.message);
-    res.status(500).json({ error: 'Error al contactar Hugging Face' });
-  }
-});
-// ==================== FIN ENDPOINT HF CUOTAS ====================
+
 
 // ==================== ENDPOINT DE ESTADO DE AGENTES ====================
 
@@ -768,11 +824,9 @@ app.post('/api/huggingface/cuotas', async (req, res) => {
 
 
 
-app.get('/api/agents-status', async (req, res) => {
-  const GEMINI_B64 = 'QVEuQWI4Uk42SVNDbFk0WnNqSXRpZlNCaXZkeUppblBjMUdoNEljMUJGM2Nxc3RBVjRsa2c=';
-  const GROQ_B64 = 'Z3NrX05rU01oNlBxdm9qdElnNTlrT1QyV0dkeWIzRlkwc3dDYVZHYzRGa055ZFV6OGZYcjl0SXc=';
-  const geminiKey = Buffer.from(GEMINI_B64, 'base64').toString();
-  const groqKey   = Buffer.from(GROQ_B64, 'base64').toString();
+app.get('/api/agents-status', requireAdmin, async (req, res) => {
+  const geminiKey = GEMINI_API_KEY;
+  const groqKey   = GROQ_API_KEY;
   const status = { Geminis02: 'unknown', Agente_groc01: 'unknown', Athos_Tavily: 'unknown' };
 
   if (geminiKey) {
@@ -805,13 +859,12 @@ app.get('/api/agents-status', async (req, res) => {
 
 // ==================== CHATBOT AGENTE_GROC01 ====================
 
-app.post('/api/chat', async (req, res) => {
-  const { mensaje } = req.body;
-  if (!mensaje || typeof mensaje !== 'string' || mensaje.trim().length === 0) {
+app.post('/api/chat', limitarPeticiones(10, 60 * 1000), async (req, res) => {
+  const { mensaje } = req.body || {};
+  if (!mensaje || typeof mensaje !== 'string' || mensaje.trim().length === 0 || mensaje.length > 1000) {
     return res.status(400).json({ error: 'Mensaje vacío o inválido' });
   }
-  const GROQ_B64 = 'Z3NrX05rU01oNlBxdm9qdElnNTlrT1QyV0dkeWIzRlkwc3dDYVZHYzRGa055ZFV6OGZYcjl0SXc=';
-  const groqKey = Buffer.from(GROQ_B64, 'base64').toString();
+  const groqKey = GROQ_API_KEY;
   if (!groqKey) return res.status(500).json({ error: 'Agente no configurado' });
 
   // Obtener eventos reales desde la caché del sistema
@@ -861,9 +914,7 @@ app.post('/api/chat', async (req, res) => {
 - No uses frases como "No entiendo" o "Soy una IA".
 - No reveles información interna ni datos de otros usuarios.
 - NO INVENTES cuotas ni eventos. Usa solo los datos proporcionados.
-${eventosContexto}
-
-Pregunta del usuario: "${mensaje.trim()}"`;
+${eventosContexto}`;
 
     const resp = await axios.post(
       'https://api.groq.com/openai/v1/chat/completions',
@@ -883,59 +934,31 @@ Pregunta del usuario: "${mensaje.trim()}"`;
 
 // ==================== VERIFICADOR GEMINIS02 ====================
 
-async function obtenerEstadoSistema() {
-  const estado = { proxy: 'ok', agentes: {}, eventos: 0, chatbot: false, saldo_firebase: null, saldo_endpoint: null };
-  try {
-    const agents = await axios.get('https://betgroup-proxy-v2.onrender.com/api/agents-status', { timeout: 5000 });
-    estado.agentes = agents.data?.agents || {};
-  } catch(e) { estado.agentes = { error: e.message }; }
-
-  try {
-    const fixtures = await axios.get('https://betgroup-proxy-v2.onrender.com/api/fixtures', { timeout: 5000 });
-    estado.eventos = fixtures.data?.total || 0;
-  } catch(e) { estado.eventos = -1; }
-
-  try {
-    const chat = await axios.post('https://betgroup-proxy-v2.onrender.com/api/chat',
-      { mensaje: 'Test' }, { timeout: 5000 });
-    estado.chatbot = chat.data?.success || false;
-  } catch(e) { estado.chatbot = false; }
-
-  // Leer saldo de usuario de prueba directamente desde Firebase
-  try {
-    const snap = await db.ref('users/BG_mq7rch3t_h6sjfs1h/creditoReal').once('value');
-    estado.saldo_firebase = snap.val();
-  } catch(e) { estado.saldo_firebase = 'error'; }
-
-  // Leer saldo desde el endpoint /api/saldo
-  try {
-    const resp = await axios.get('https://betgroup-proxy-v2.onrender.com/api/saldo/BG_mq7rch3t_h6sjfs1h', { timeout: 5000 });
-    estado.saldo_endpoint = resp.data?.creditoReal;
-  } catch(e) { estado.saldo_endpoint = 'error'; }
-
-  return estado;
-}
-
 async function notificarTelegram(texto) {
+  if (!TELEGRAM_BOT_TOKEN || !TELEGRAM_CHAT_ID) return;
   try {
-    await axios.post('https://api.telegram.org/bot8671464180:AAHhu_Ct9-3Q6Arjle-7Xy4DyUGuuNvraBs/sendMessage', {
-      chat_id: '-5154764705',
+    await axios.post(`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage`, {
+      chat_id: TELEGRAM_CHAT_ID,
       text: texto,
       parse_mode: 'HTML'
     }, { timeout: 5000 });
   } catch(e) { console.error('Error notificando a Telegram:', e.message); }
 }
 
-app.get('/api/verificacion-geminis', async (req, res) => {
+app.get('/api/verificacion-geminis', requireAdmin, async (req, res) => {
   try {
     const estado = { proxy: 'ok', agentes: {}, eventos: 0, chatbot: false, saldo_firebase: null, saldo_endpoint: null };
     
+    // Se verifica a sí mismo en su URL real (antes apuntaba a un host equivocado sin "-8vqj")
+    const base = SELF_URL;
+    const cabeceras = { headers: { 'x-admin-key': ADMIN_API_KEY }, timeout: 3000 };
+    const uidPrueba = process.env.UID_PRUEBA || '';
     const [agentsResp, fixturesResp, chatResp, saldoFB, saldoEP] = await Promise.allSettled([
-      axios.get('https://betgroup-proxy-v2.onrender.com/api/agents-status', { timeout: 3000 }),
-      axios.get('https://betgroup-proxy-v2.onrender.com/api/fixtures', { timeout: 3000 }),
-      axios.post('https://betgroup-proxy-v2.onrender.com/api/chat', { mensaje: 'Test' }, { timeout: 3000 }),
-      db.ref('users/BG_mq7rch3t_h6sjfs1h/creditoReal').once('value'),
-      axios.get('https://betgroup-proxy-v2.onrender.com/api/saldo/BG_mq7rch3t_h6sjfs1h', { timeout: 3000 })
+      axios.get(base + '/api/agents-status', cabeceras),
+      axios.get(base + '/api/fixtures', { timeout: 3000 }),
+      axios.post(base + '/api/chat', { mensaje: 'Test' }, { timeout: 3000 }),
+      uidPrueba ? db.ref('users/' + uidPrueba + '/creditoReal').once('value') : Promise.reject(new Error('sin UID_PRUEBA')),
+      uidPrueba ? axios.get(base + '/api/saldo/' + uidPrueba, { timeout: 3000 }) : Promise.reject(new Error('sin UID_PRUEBA'))
     ]);
 
     if (agentsResp.status === 'fulfilled') estado.agentes = agentsResp.value.data?.agents || {};
@@ -945,7 +968,7 @@ app.get('/api/verificacion-geminis', async (req, res) => {
     if (saldoEP.status === 'fulfilled') estado.saldo_endpoint = saldoEP.value.data?.creditoReal;
 
     // Formato exacto del curl funcional
-    const geminiKey = 'AQ.Ab8RN6ISClY4ZsjItifSBivdyJinPc1Gh4Ic1BF3cqstAV4lkg';
+    const geminiKey = GEMINI_API_KEY;
     let informe = 'Sistema operativo. Saldo Firebase: ' + estado.saldo_firebase + ' | Saldo endpoint: ' + estado.saldo_endpoint;
     
     try {
@@ -959,20 +982,16 @@ app.get('/api/verificacion-geminis', async (req, res) => {
       }
     } catch(e) { console.log('Gemini no disponible para el informe, usando resumen básico'); }
 
-    await axios.post('https://api.telegram.org/bot8671464180:AAHhu_Ct9-3Q6Arjle-7Xy4DyUGuuNvraBs/sendMessage', {
-      chat_id: '-5154764705',
-      text: '📊 <b>INFORME DE GEMINIS02</b>\n\n' + informe,
-      parse_mode: 'HTML'
-    }, { timeout: 5000 });
+    await notificarTelegram('📊 <b>INFORME DE GEMINIS02</b>\n\n' + informe);
 
     res.json({ success: true, estado, informe });
-  } catch(e) { res.status(500).json({ error: e.message }); }
+  } catch(e) { res.status(500).json({ error: 'Error interno' }); }
 });
 
 
 
 // ==================== LIQUIDACIÓN DE APUESTAS (TRANSACCIONAL) ====================
-app.post('/api/apuestas/liquidar', async (req, res) => {
+app.post('/api/apuestas/liquidar', requireAdmin, async (req, res) => {
   const { partidoId, resultadoGanador } = req.body;
   if (!partidoId || !resultadoGanador) {
     return res.status(400).json({ error: 'partidoId y resultadoGanador requeridos' });
@@ -1007,14 +1026,10 @@ app.post('/api/apuestas/liquidar', async (req, res) => {
           const userData = userSnap.val() || {};
           const saldoActual = userData.creditoReal || 0;
           const nombreUsuario = userData.nombre || 'Usuario';
-          const emailUsuario = userData.email || '';
-          const telefonoUsuario = (userData.datosBancarios && userData.datosBancarios.telefono) ? userData.datosBancarios.telefono : '';
           let msgGanada = '';
           msgGanada += '🏆 APUESTA GANADA 🏆' + NL;
           msgGanada += '━━━━━━━━━━━━━━━━━━━━━━' + NL;
           msgGanada += '👤 Usuario: ' + nombreUsuario + NL;
-          msgGanada += '📧 Email: ' + emailUsuario + NL;
-          if (telefonoUsuario) { msgGanada += '📱 Tel: ' + telefonoUsuario + NL; }
           msgGanada += '━━━━━━━━━━━━━━━━━━━━━━' + NL;
           msgGanada += '⚽ Evento: ' + apuesta.eventoNombre + NL;
           msgGanada += '🎯 Seleccion: ' + apuesta.tipo + NL;
@@ -1041,7 +1056,7 @@ app.post('/api/apuestas/liquidar', async (req, res) => {
     }
     res.json({ success: true, liquidadas, message: `${liquidadas} apuestas liquidadas.` });
   } catch (error) {
-    res.status(500).json({ error: error.message });
+    res.status(500).json({ error: 'Error interno' });
   }
 });
 // ==================== FIN LIQUIDACIÓN ====================
@@ -1049,7 +1064,7 @@ app.post('/api/apuestas/liquidar', async (req, res) => {
 
 
 // ==================== REINICIO DEL SISTEMA (MULTI-NODO) ====================
-app.post('/api/admin/reiniciar', async (req, res) => {
+app.post('/api/admin/reiniciar', requireAdmin, async (req, res) => {
   try {
     const updates = {
       'apuestas': null,
@@ -1069,7 +1084,7 @@ app.post('/api/admin/reiniciar', async (req, res) => {
     });
     res.status(200).json({ success: true, message: 'Sistema reiniciado. Auditoría e historial limpios.' });
   } catch (error) {
-    res.status(500).json({ success: false, error: error.message });
+    res.status(500).json({ success: false, error: 'Error interno' });
   }
 });
 // ==================== FIN REINICIO ====================
@@ -1077,18 +1092,27 @@ app.post('/api/admin/reiniciar', async (req, res) => {
 
 
 // ==================== REFERIDOS FILTRADOS POR SUBADMIN ====================
-app.get('/api/usuarios/mis-referidos', async (req, res) => {
+app.get('/api/usuarios/mis-referidos', requireAdmin, async (req, res) => {
   const subadminUid = req.query.subadminUid;
-  if (!subadminUid) return res.status(400).json({ error: 'subadminUid requerido' });
+  if (typeof subadminUid !== 'string' || !UID_VALIDO.test(subadminUid)) {
+    return res.status(400).json({ error: 'subadminUid requerido' });
+  }
   try {
     const snapshot = await db.ref('users')
       .orderByChild('creadoPor')
       .equalTo(subadminUid)
       .once('value');
-    const referidos = snapshot.val() ? Object.values(snapshot.val()) : [];
+    const CAMPOS_PRIVADOS = ['password', 'passwordHash', 'hash', 'salt', 'datosBancarios'];
+    const referidos = snapshot.val()
+      ? Object.values(snapshot.val()).map(u => {
+          const copia = { ...u };
+          CAMPOS_PRIVADOS.forEach(c => delete copia[c]);
+          return copia;
+        })
+      : [];
     res.json(referidos);
   } catch (error) {
-    res.status(500).json({ error: error.message });
+    res.status(500).json({ error: 'Error interno' });
   }
 });
 // ==================== FIN REFERIDOS ====================
@@ -1096,7 +1120,7 @@ app.get('/api/usuarios/mis-referidos', async (req, res) => {
 
 
 // ==================== GENERAR CÓDIGO POR INICIAL DEL ROL ====================
-app.get('/api/admin/generar-codigo', async (req, res) => {
+app.get('/api/admin/generar-codigo', requireAdmin, async (req, res) => {
   const { rol = 'ceo' } = req.query;
   const rolesValidos = ['ceo', 'admin', 'moderador', 'soporte'];
   if (!rolesValidos.includes(rol)) return res.status(400).json({ error: 'Rol no válido' });
@@ -1119,9 +1143,11 @@ app.get('/api/admin/generar-codigo', async (req, res) => {
 
 
 // ==================== APLICAR CÓDIGO CEO ====================
-app.post('/api/admin/aplicar-codigo', async (req, res) => {
-  const { codigo, uid } = req.body;
-  if (!codigo || !uid) return res.status(400).json({ error: 'Código o UID faltante' });
+app.post('/api/admin/aplicar-codigo', requireAdmin, async (req, res) => {
+  const { codigo, uid } = req.body || {};
+  if (typeof codigo !== 'string' || typeof uid !== 'string' || !UID_VALIDO.test(uid)) {
+    return res.status(400).json({ error: 'Código o UID faltante' });
+  }
 
   const rolMap = { 'C': 'ceo', 'A': 'admin', 'M': 'moderador', 'S': 'soporte' };
   const rol = rolMap[codigo.charAt(0)];
@@ -1167,9 +1193,14 @@ const HF_MODELS = {
   rapido: 'Qwen/Qwen2.5-7B-Instruct'
 };
 
-app.post('/api/huggingface', async (req, res) => {
-  const { prompt, tarea, rol } = req.body;
-  if (!prompt) return res.status(400).json({ error: 'Falta prompt' });
+app.post('/api/huggingface', limitarPeticiones(10, 60 * 1000), async (req, res) => {
+  const { prompt, tarea } = req.body || {};
+  if (typeof prompt !== 'string' || prompt.trim().length === 0 || prompt.length > 1000) {
+    return res.status(400).json({ error: 'Falta prompt' });
+  }
+  // El rol se incrusta en las instrucciones: solo se aceptan valores conocidos
+  const ROLES_CHAT = ['miembro', 'member', 'subadmin', 'director', 'admin', 'superadmin'];
+  const rol = ROLES_CHAT.includes(req.body.rol) ? req.body.rol : 'miembro';
   const model = HF_MODELS[tarea] || HF_MODELS['rapido'];
 
   let eventosReales = '';
@@ -1234,7 +1265,7 @@ Reglas:
 - Si el usuario es "admin" o "subadmin", habla de gestión general sin dar acceso al sistema.
 - Si el usuario es "member" o "director", limítate a recomendar apuestas y resolver dudas de la plataforma.
 - Responde con pasión por el deporte, como un fanático más.
-El usuario actual tiene rol: ${rol || 'miembro'}.`;
+El usuario actual tiene rol: ${rol}.`;
 
   try {
     const _cfReply2 = await callCF([{ role: 'system', content: systemPrompt }, { role: 'user', content: prompt }], 'potente');
@@ -1247,17 +1278,18 @@ El usuario actual tiene rol: ${rol || 'miembro'}.`;
 
 
 // ════ POST /api/enriquecer ════
-app.post('/api/enriquecer', async (req, res) => {
+app.post('/api/enriquecer', limitarPeticiones(20, 60 * 1000), async (req, res) => {
   try {
-    const { eventos } = req.body;
-    if (!Array.isArray(eventos) || eventos.length === 0) {
-      return res.status(400).json({ error: 'Se requiere array de eventos' });
+    const { eventos } = req.body || {};
+    if (!Array.isArray(eventos) || eventos.length === 0 || eventos.length > 300 ||
+        !eventos.every(e => e && typeof e === 'object' && typeof e.local === 'string' && typeof e.visitante === 'string')) {
+      return res.status(400).json({ error: 'Se requiere array de eventos válido' });
     }
     const enriquecidos = await enriquecerConCuotas(eventos);
     res.json({ status: 'success', total: enriquecidos.length, data: enriquecidos });
   } catch(err) {
     console.error('Error /api/enriquecer:', err.message);
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: 'Error interno' });
   }
 });
 
@@ -1466,7 +1498,7 @@ function programarReportes() {
   console.log('Sistema automatizado: reportes 8am/2pm Cuba, liquidacion 30min, monitoreo 24h.');
 }
 // ════ MONITOREO DEL SISTEMA ════
-app.get('/api/estado-sistema', async (req, res) => {
+app.get('/api/estado-sistema', requireAdmin, async (req, res) => {
   const estado = {
     timestamp: new Date().toISOString(),
     proxy: 'online',
@@ -1495,17 +1527,17 @@ app.get('/api/estado-sistema', async (req, res) => {
 });
 
 // ENDPOINT DE PRUEBA - disparar reporte manualmente
-app.post('/api/test-reporte', async (req, res) => {
+app.post('/api/test-reporte', requireAdmin, async (req, res) => {
   try {
     await enviarReporteTelegram();
     res.json({ success: true, message: 'Reporte enviado a Telegram.' });
   } catch(e) {
-    res.json({ success: false, error: e.message });
+    res.json({ success: false, error: 'Error interno' });
   }
 });
 
 // ENDPOINT DEBUG - ver que eventos tiene el reporte
-app.get('/api/debug-reporte', async (req, res) => {
+app.get('/api/debug-reporte', requireAdmin, async (req, res) => {
   try {
     const fixtures = getCache('fixtures');
     const cacheEvs = fixtures && fixtures.data ? fixtures.data.length : 0;
@@ -1524,9 +1556,100 @@ app.get('/api/debug-reporte', async (req, res) => {
       cf_token: process.env.CF_TOKEN ? 'OK' : 'FALTA'
     });
   } catch(e) {
-    res.json({ error: e.message });
+    res.json({ error: 'Error interno' });
   }
 });
+
+// ==================== AVISOS E IMÁGENES PARA EL FRONTEND ====================
+// El navegador ya no lleva las claves de Telegram ni de ImgBB: pasa por aquí.
+
+const TEXTO_MAXIMO_TELEGRAM = 3500;
+
+app.post('/api/notificar', limitarPeticiones(15, 60 * 1000), async (req, res) => {
+  const { texto } = req.body || {};
+  if (typeof texto !== 'string' || texto.trim().length === 0 || texto.length > TEXTO_MAXIMO_TELEGRAM) {
+    return res.status(400).json({ error: 'Texto inválido' });
+  }
+  if (!TELEGRAM_BOT_TOKEN || !TELEGRAM_CHAT_ID) {
+    return res.status(503).json({ error: 'Avisos no configurados' });
+  }
+  try {
+    await axios.post(`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage`, {
+      chat_id: TELEGRAM_CHAT_ID, text: texto, parse_mode: 'HTML'
+    }, { timeout: 8000 });
+    res.json({ success: true });
+  } catch (err) {
+    console.error('Error /api/notificar:', err.message);
+    res.status(502).json({ error: 'No se pudo enviar el aviso' });
+  }
+});
+
+// Solo se aceptan fotos alojadas en ImgBB (las que sube /api/subir-imagen)
+const URL_FOTO_PERMITIDA = /^https:\/\/i\.ibb\.co\/[A-Za-z0-9/_.-]+$/;
+
+app.post('/api/notificar-foto', limitarPeticiones(10, 60 * 1000), async (req, res) => {
+  const { url, texto } = req.body || {};
+  if (typeof url !== 'string' || !URL_FOTO_PERMITIDA.test(url) ||
+      (texto !== undefined && (typeof texto !== 'string' || texto.length > 1000))) {
+    return res.status(400).json({ error: 'Datos inválidos' });
+  }
+  if (!TELEGRAM_BOT_TOKEN || !TELEGRAM_CHAT_ID) {
+    return res.status(503).json({ error: 'Avisos no configurados' });
+  }
+  try {
+    await axios.post(`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendPhoto`, {
+      chat_id: TELEGRAM_CHAT_ID, photo: url, caption: texto || ''
+    }, { timeout: 8000 });
+    res.json({ success: true });
+  } catch (err) {
+    console.error('Error /api/notificar-foto:', err.message);
+    res.status(502).json({ error: 'No se pudo enviar la foto' });
+  }
+});
+
+const IMGBB_API_KEY = process.env.IMGBB_API_KEY || '';
+const IMAGEN_MAXIMA_BYTES = 5 * 1024 * 1024;
+
+app.post('/api/subir-imagen',
+  limitarPeticiones(10, 60 * 1000),
+  express.json({ limit: '8mb' }),
+  async (req, res) => {
+    const { imagenBase64 } = req.body || {};
+    if (typeof imagenBase64 !== 'string' || imagenBase64.length === 0) {
+      return res.status(400).json({ error: 'Imagen requerida' });
+    }
+    if (!IMGBB_API_KEY) {
+      return res.status(503).json({ error: 'Subida de imágenes no configurada' });
+    }
+    let limpia;
+    try {
+      // Admite "data:image/...;base64,XXXX" o solo el base64
+      const base64 = imagenBase64.replace(/^data:image\/[a-z+]+;base64,/i, '');
+      const original = Buffer.from(base64, 'base64');
+      if (original.length === 0 || original.length > IMAGEN_MAXIMA_BYTES) {
+        return res.status(400).json({ error: 'La imagen debe pesar menos de 5 MB' });
+      }
+      limpia = limpiarMetadatos(original).datos;
+    } catch (err) {
+      return res.status(400).json({ error: 'Formato no permitido: usa JPG, PNG o WEBP' });
+    }
+    try {
+      const formulario = new URLSearchParams();
+      formulario.append('image', limpia.toString('base64'));
+      const resp = await axios.post(
+        `https://api.imgbb.com/1/upload?key=${encodeURIComponent(IMGBB_API_KEY)}`,
+        formulario.toString(),
+        { headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, timeout: 20000, maxBodyLength: 12 * 1024 * 1024 }
+      );
+      const url = resp.data?.data?.url;
+      if (!url) throw new Error('ImgBB no devolvió URL');
+      res.json({ success: true, url });
+    } catch (err) {
+      console.error('Error /api/subir-imagen:', err.message);
+      res.status(502).json({ error: 'No se pudo subir la imagen' });
+    }
+  }
+);
 
 app.listen(PORT, () => {
   console.log(`✅ Proxy escuchando en puerto ${PORT}`);
