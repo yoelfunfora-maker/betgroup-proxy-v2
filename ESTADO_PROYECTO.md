@@ -99,6 +99,15 @@ Contrato nuevo de `/api/apostar`: `{eventoId, tipo: Local|Visitante|Empate, amou
 - `uuid` (moderada, dependencia interna de firebase-admin) sin arreglo publicado aún.
 - `server.js` y `servidor.js.bak_*` siguen en el repo (sin autorización para borrarlos).
 
+## Incidente 2 oct 2026: llave maestra publicada en internet (RESUELTO)
+
+- El frontend se publica desde el móvil de Yoel (`~/betgroup-hosting`, Termux, `firebase deploy`), NO desde Render. Copia privada en el repo `betgroup-frontend`.
+- `firebase.json` tenía `"public": "."` → Firebase Hosting servía la carpeta entera: `serviceAccountKey.json`, `accounts.txt`, `proxies.txt`, `.bak`, etc.
+- Arreglo: `"public": "publico"` (solo los 21 archivos de la web) y nuevo `firebase deploy --only hosting`. Verificado: esos archivos ya no se sirven.
+- Llave de cuenta de servicio rotada: nueva clave `0d587a42…`, cargada en Render (`FIREBASE_SERVICE_ACCOUNT_B64`) vía API, servidor reiniciado y verificado (health OK, lectura Firebase 200). Claves viejas borradas en Google Cloud (confirmado por Yoel).
+- **Reglas de RTDB (`database.rules.json`) con `.read: true` y `.write: true` en todos los nodos** → siguiente trabajo (Etapa 3).
+- ⚠️ Nunca publicar ni subir la carpeta `betgroup-hosting` entera. Nunca `git push --force` desde ella: su `main` local (d65b0e1) no coincide con GitHub.
+
 ## Decisiones de Yoel (2 oct 2026)
 
 - **Las claves filtradas NO se rotan** (decisión de Yoel, riesgo aceptado). Se cargan tal cual en las variables de entorno de Render. Siguen visibles en el historial público de git.
