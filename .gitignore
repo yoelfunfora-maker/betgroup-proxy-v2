@@ -4,3 +4,4 @@ node_modules/
 .env.*
 !.env.example
 test/fallo-navegador.png
+test/captura-*.png

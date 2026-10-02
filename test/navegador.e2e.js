@@ -41,13 +41,14 @@ arrancar({
 http.createServer((req, res) => {
   const f = path.join(FRONT, decodeURIComponent(req.url.split('?')[0]).replace(/^\/+/, '') || 'index.html');
   if (!f.startsWith(FRONT) || !fs.existsSync(f) || fs.statSync(f).isDirectory()) { res.writeHead(404); return res.end(); }
-  res.writeHead(200, { 'content-type': f.endsWith('.js') ? 'text/javascript' : 'text/html; charset=utf-8' });
+  res.writeHead(200, { 'content-type': f.endsWith('.js') ? 'text/javascript' : f.endsWith('.woff2') ? 'font/woff2' : 'text/html; charset=utf-8' });
   fs.createReadStream(f).pipe(res);
 }).listen(PUERTO_WEB);
 
 (async () => {
   const navegador = await chromium.launch();
-  const pagina = await navegador.newPage();
+  // Tamaño de móvil: así la usan los usuarios
+  const pagina = await navegador.newPage({ viewport: { width: 400, height: 860 }, deviceScaleFactor: 1 });
   const prohibidas = [];
   const erroresJs = [];
   pagina.on('pageerror', (e) => erroresJs.push(e.message));
@@ -84,10 +85,15 @@ http.createServer((req, res) => {
     await pagina.waitForFunction(() => document.getElementById('hReal') && document.getElementById('hReal').innerText === '500', null, { timeout: 15000 });
     ok(true, 'la cabecera muestra su saldo real: 500');
 
-    await pagina.waitForSelector('.odd-box.local', { timeout: 20000 });
-    const cuotaPantalla = await pagina.textContent('.odd-box.local .odd-value');
-    ok(cuotaPantalla.trim() === '1.8', 'los partidos y cuotas salen del servidor (cuota local ' + cuotaPantalla.trim() + ')');
-    await pagina.click('.odd-box.local');
+    await pagina.waitForSelector('.bg-cuota', { timeout: 20000 });
+    await pagina.screenshot({ path: path.join(__dirname, 'captura-inicio.png') });
+    const cuotaPantalla = await pagina.textContent('.bg-cuota >> nth=0 >> b');
+    ok(cuotaPantalla.trim() === '1.80', 'los partidos y cuotas salen del servidor (cuota local ' + cuotaPantalla.trim() + ')');
+    await pagina.click('.bg-cuota >> nth=0');
+    ok((await pagina.textContent('#confirmBetBtn')).trim() === 'Apostar 100 CR', 'el boleto propone 100 CR y el botón dice la cifra');
+    await pagina.fill('#betInput', '5000');
+    ok(await pagina.isDisabled('#confirmBetBtn') && (await pagina.textContent('#bsRiskMsg')).includes('saldo'), 'monto mayor que el saldo: botón bloqueado con aviso');
+    await pagina.screenshot({ path: path.join(__dirname, 'captura-boleto.png') });
     await pagina.fill('#betInput', '100');
     await pagina.click('#confirmBetBtn');
     await pagina.waitForFunction(() => document.getElementById('toast').textContent.includes('Apuesta registrada'), null, { timeout: 15000 });
@@ -96,8 +102,9 @@ http.createServer((req, res) => {
       'apuesta desde la web: registrada en el servidor y saldo 500 → ' + get('users/BG_m1/creditoReal'));
 
     // Mercado de más/menos goles desde la web
-    await pagina.click('.extra-btn:has-text("Over 2.5")');
-    ok((await pagina.textContent('#bsSelection')).trim() === 'Over 2.5', 'el boleto muestra "Over 2.5" (antes decía "Empate")');
+    await pagina.click('.bg-mas');
+    await pagina.click('.bg-cuota:has-text("Más de 2.5")');
+    ok((await pagina.textContent('#bsSelection')).trim() === 'Más de 2.5', 'el boleto muestra "Más de 2.5" (antes decía "Empate")');
     await pagina.fill('#betInput', '100');
     await pagina.click('#confirmBetBtn');
     await pagina.waitForFunction(() => document.getElementById('toast').textContent.includes('×1.9'), null, { timeout: 15000 });
