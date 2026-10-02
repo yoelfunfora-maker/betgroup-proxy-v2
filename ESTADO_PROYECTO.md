@@ -129,7 +129,7 @@ Publicada por Yoel con `publicar_todo.sh`: variables en Render (200), servidor e
 4. `3_cerrar_reglas.sh` — reglas cerradas (con copia de las antiguas).
 - Emergencia: `revertir.sh`.
 
-## Etapa 4 — liquidación completa (2 oct 2026)
+## Etapa 4 — liquidación completa (DESPLEGADA 2 oct 2026, 13:09 hora de Cuba; web en Hosting, copia en publico.bak_20261002_130903)
 
 - `lib/mercados.js`: 1X2, hándicap (`Handicap <equipo> (±N)`) y más/menos (`Over/Under N`). Cuota del servidor y resolución con marcador; línea exacta = devolución.
 - Liquidación automática (cada 30 min o `POST /api/admin/liquidar-ahora`): todas las competiciones de `DEPORTES`, consultando ESPN en la fecha de cada partido (las apuestas guardan `ruta` y `horaInicio`). Tenis/UFC por ganador. Cancelado → se devuelve; aplazado → se devuelve tras 48 h.
