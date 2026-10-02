@@ -34,10 +34,12 @@ try {
 
 
 // ==================== NOTIFICACIÓN DE ERRORES A TELEGRAM ====================
-const TELEGRAM_BOT_TOKEN = '8671464180:AAHhu_Ct9-3Q6Arjle-7Xy4DyUGuuNvraBs';
-const TELEGRAM_CHAT_ID = '-5154764705';
+// Las claves se leen de las variables de entorno de Render (nunca escritas en el código)
+const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN || '';
+const TELEGRAM_CHAT_ID = process.env.TELEGRAM_CHAT_ID || '';
 
 function notifyTelegram(texto) {
+  if (!TELEGRAM_BOT_TOKEN || !TELEGRAM_CHAT_ID) return;
   const url = `https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage`;
   require('https').get(`${url}?chat_id=${TELEGRAM_CHAT_ID}&text=${encodeURIComponent(texto)}`).on('error', () => {});
 }
@@ -77,17 +79,17 @@ function setCache(key, data) {
 
 // ==================== API KEYS ====================
 
-const ODDS_API_KEY_1 = process.env.ODDS_API_KEY_1 || '';
-const ODDS_API_KEY_2 = process.env.ODDS_API_KEY_2 || '';
+// ODDS_API_KEYS: lista separada por comas (admite 3, 4 o más claves)
+const ODDS_API_KEYS = (process.env.ODDS_API_KEYS || '')
+  .split(',').map(k => k.trim()).filter(Boolean);
+const GEMINI_API_KEY = process.env.GEMINI_API_KEY || '';
+const GROQ_API_KEY = process.env.GROQ_API_KEY || '';
 
+// Rota la clave según la hora del día, repartiendo el día entre las claves disponibles
 function getApiKey() {
-  const hour = new Date().getHours();
-  // KEY1: horas 0-7 (medianoche a 8am)
-  if (hour < 8)  return 'c56f6c464ebd4fb634c495a2c2488610';
-  // KEY2: horas 8-15 (8am a 4pm)
-  if (hour < 16) return 'e18abd8956512f34027f0ac3f87fbe52';
-  // KEY3: horas 16-23 (4pm a medianoche)
-  return '0e31c3149f0afbb009491a0cd80169f4';
+  if (ODDS_API_KEYS.length === 0) return '';
+  const tramo = Math.floor(new Date().getHours() * ODDS_API_KEYS.length / 24);
+  return ODDS_API_KEYS[tramo];
 }
 
 // ==================== ESPN FETCH ====================
@@ -408,11 +410,7 @@ async function enriquecerConCuotas(eventos) {
         // MMA solo tiene h2h, los demás tienen spreads y totals también
         const mkts = sportKey === 'mma_mixed_martial_arts' ? 'h2h' : 'h2h,spreads,totals';
         // Intentar con múltiples claves si la primera falla (ej. 401 para MMA)
-        const apiKeys = [
-          'c56f6c464ebd4fb634c495a2c2488610',
-          'e18abd8956512f34027f0ac3f87fbe52',
-          '0e31c3149f0afbb009491a0cd80169f4'
-        ];
+        const apiKeys = ODDS_API_KEYS;
         let success = false;
         for (const key of apiKeys) {
           try {
@@ -425,7 +423,7 @@ async function enriquecerConCuotas(eventos) {
               break;
             }
           } catch(innerErr) {
-            console.warn(`  Clave falló: ${key.slice(0,10)}... (${innerErr.message})`);
+            console.warn(`  Clave falló: ${key.slice(0,4)}… (${innerErr.message})`);
             continue;
           }
         }
@@ -769,10 +767,8 @@ app.post('/api/huggingface/cuotas', async (req, res) => {
 
 
 app.get('/api/agents-status', async (req, res) => {
-  const GEMINI_B64 = 'QVEuQWI4Uk42SVNDbFk0WnNqSXRpZlNCaXZkeUppblBjMUdoNEljMUJGM2Nxc3RBVjRsa2c=';
-  const GROQ_B64 = 'Z3NrX05rU01oNlBxdm9qdElnNTlrT1QyV0dkeWIzRlkwc3dDYVZHYzRGa055ZFV6OGZYcjl0SXc=';
-  const geminiKey = Buffer.from(GEMINI_B64, 'base64').toString();
-  const groqKey   = Buffer.from(GROQ_B64, 'base64').toString();
+  const geminiKey = GEMINI_API_KEY;
+  const groqKey   = GROQ_API_KEY;
   const status = { Geminis02: 'unknown', Agente_groc01: 'unknown', Athos_Tavily: 'unknown' };
 
   if (geminiKey) {
@@ -810,8 +806,7 @@ app.post('/api/chat', async (req, res) => {
   if (!mensaje || typeof mensaje !== 'string' || mensaje.trim().length === 0) {
     return res.status(400).json({ error: 'Mensaje vacío o inválido' });
   }
-  const GROQ_B64 = 'Z3NrX05rU01oNlBxdm9qdElnNTlrT1QyV0dkeWIzRlkwc3dDYVZHYzRGa055ZFV6OGZYcjl0SXc=';
-  const groqKey = Buffer.from(GROQ_B64, 'base64').toString();
+  const groqKey = GROQ_API_KEY;
   if (!groqKey) return res.status(500).json({ error: 'Agente no configurado' });
 
   // Obtener eventos reales desde la caché del sistema
@@ -917,9 +912,10 @@ async function obtenerEstadoSistema() {
 }
 
 async function notificarTelegram(texto) {
+  if (!TELEGRAM_BOT_TOKEN || !TELEGRAM_CHAT_ID) return;
   try {
-    await axios.post('https://api.telegram.org/bot8671464180:AAHhu_Ct9-3Q6Arjle-7Xy4DyUGuuNvraBs/sendMessage', {
-      chat_id: '-5154764705',
+    await axios.post(`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage`, {
+      chat_id: TELEGRAM_CHAT_ID,
       text: texto,
       parse_mode: 'HTML'
     }, { timeout: 5000 });
@@ -945,7 +941,7 @@ app.get('/api/verificacion-geminis', async (req, res) => {
     if (saldoEP.status === 'fulfilled') estado.saldo_endpoint = saldoEP.value.data?.creditoReal;
 
     // Formato exacto del curl funcional
-    const geminiKey = 'AQ.Ab8RN6ISClY4ZsjItifSBivdyJinPc1Gh4Ic1BF3cqstAV4lkg';
+    const geminiKey = GEMINI_API_KEY;
     let informe = 'Sistema operativo. Saldo Firebase: ' + estado.saldo_firebase + ' | Saldo endpoint: ' + estado.saldo_endpoint;
     
     try {
@@ -959,11 +955,7 @@ app.get('/api/verificacion-geminis', async (req, res) => {
       }
     } catch(e) { console.log('Gemini no disponible para el informe, usando resumen básico'); }
 
-    await axios.post('https://api.telegram.org/bot8671464180:AAHhu_Ct9-3Q6Arjle-7Xy4DyUGuuNvraBs/sendMessage', {
-      chat_id: '-5154764705',
-      text: '📊 <b>INFORME DE GEMINIS02</b>\n\n' + informe,
-      parse_mode: 'HTML'
-    }, { timeout: 5000 });
+    await notificarTelegram('📊 <b>INFORME DE GEMINIS02</b>\n\n' + informe);
 
     res.json({ success: true, estado, informe });
   } catch(e) { res.status(500).json({ error: e.message }); }
