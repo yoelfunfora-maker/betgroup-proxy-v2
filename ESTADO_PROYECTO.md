@@ -238,6 +238,16 @@ Decisiones de Yoel: rangos visibles **Agente** (rol interno `subadmin`) y **Supe
 - Un **supervisor con jugadores propios sigue cobrando por ellos como agente** (% por ganancia + 3 % de inyección) además de su 5 % de equipo (decisión de Yoel). En la tabla del CEO aparece como «(supervisor)».
 - `lib/comisiones.js` (`inyeccionJugador`, `PCT_INYECCION`); campos `depositado`, `retirado`, `inyeccionNeta`, `comisionInyeccion`, `totalAgente`. Paneles del agente y del CEO y desglose de Telegram actualizados. Prueba en `test/comisiones.prueba.js`.
 
+## Entrar con Google + Cloudflare Turnstile (2 oct 2026) — PREPARADO, SIN DESPLEGAR
+
+Revisión previa: el "Entrar con Google" antiguo nunca funcionó en la versión en vivo (cargaba `google-auth.js`, que no existe; ningún botón llamaba a `doGoogleSignIn`) y era inseguro (creaba la cuenta escribiendo directo en la BD). Nunca hubo Turnstile en el código; cualquier desafío de Cloudflare estaría en su panel.
+- `lib/accesoExterno.js`: verificación del ID token de Google con node:crypto (RS256 con las claves oficiales de Google, en caché; iss, aud, exp, email_verified) y comprobación de Turnstile.
+- `POST /api/auth/google`: cuenta vinculada → entra; correo @gmail.com con cuenta → se vincula; persona nueva → pide apodo, teléfono y CÓDIGO DE INVITACIÓN (mismo registro, bono y reglas). Vínculos en `googleCuentas/<sub>` (ilegible desde la web); `googleSub` es campo protegido.
+- Registro normal: casilla Turnstile. Si Cloudflare dice robot → rechazo; si la casilla no carga (Cuba) → pasa con su código y queda `registro_sin_turnstile` en la auditoría; `config/turnstileObligatorio = true` la hace obligatoria.
+- `GET /api/auth/opciones` dice a la web qué mostrar. Todo APAGADO hasta definir en Render: `GOOGLE_CLIENT_ID`, `TURNSTILE_SITE_KEY`, `TURNSTILE_SECRET`.
+- Pruebas: `test/google.prueba.js` (22), `test/google.e2e.js` (10, incluye Google/Cloudflare bloqueados).
+- Pendiente: Yoel crea las claves; luego desplegar el servidor (push a main). Las funciones antiguas `doGoogleSignIn`/`showGoogleRegForm`/`completarGoogleReg` siguen en index.html sin uso (no se borran sin autorización).
+
 ## Cierre de la sesión del 2 oct 2026 — pendiente para la próxima
 
 1. **Publicar la web de las Etapas 10, 11 y 12** (el servidor estará en `etapa12`): `git -C ~/bg-frontend-privado fetch -q origin claude/upbeat-cerf-rpytdm && git -C ~/bg-frontend-privado checkout -q -B etapa3 origin/claude/upbeat-cerf-rpytdm && bash ~/bg-frontend-privado/publicar/publicar_web.sh` (copia también sw.js, manifest.json e iconos/).
