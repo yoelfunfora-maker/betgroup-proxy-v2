@@ -76,9 +76,11 @@ setTimeout(async () => {
     ok(s === 200 && get(`auditLog/${j.clave}/uid`) === 'BG_m1', 'auditLog: el servidor pone el autor real (no se puede suplantar)');
     [s] = await db(tM1, 'escribir', 'solicitudesRetiro/RET1', { valor: { id: 'RET1', userId: 'BG_m1', estado: 'pendiente', monto: 100000 } });
     ok(s === 400, 'retiro mayor que el saldo rechazado → ' + s);
-    [s] = await db(tM1, 'escribir', 'solicitudesDeposito/DEP1', { valor: { id: 'DEP1', userId: 'BG_m1', estado: 'pendiente', monto: 200, moneda: 'CUP', fotoUrl: 'https://i.ibb.co/x.jpg' } });
-    ok(s === 200, 'miembro crea su solicitud de depósito');
-    [s] = await db(tM1, 'escribir', 'solicitudesDeposito/DEP2', { valor: { id: 'DEP2', userId: 'BG_otro', estado: 'pendiente', monto: 200, moneda: 'CUP' } });
+    [s, j] = await db(tM1, 'escribir', 'solicitudesDeposito/DEP0', { valor: { id: 'DEP0', userId: 'BG_m1', estado: 'pendiente', monto: 499, moneda: 'CUP', fotoUrl: 'https://i.ibb.co/x.jpg' } });
+    ok(s === 400 && /mínimo es de 500 CUP/.test(j.error), 'depósito de menos de 500 CUP rechazado → ' + (j && j.error));
+    [s] = await db(tM1, 'escribir', 'solicitudesDeposito/DEP1', { valor: { id: 'DEP1', userId: 'BG_m1', estado: 'pendiente', monto: 500, moneda: 'CUP', fotoUrl: 'https://i.ibb.co/x.jpg' } });
+    ok(s === 200, 'miembro crea su solicitud de depósito (500 CUP, el mínimo)');
+    [s] = await db(tM1, 'escribir', 'solicitudesDeposito/DEP2', { valor: { id: 'DEP2', userId: 'BG_otro', estado: 'pendiente', monto: 500, moneda: 'CUP' } });
     ok(s === 400, 'no puede crear solicitudes a nombre de otro → ' + s);
     [s] = await db(tM1, 'actualizar', 'users/BG_m1', { valor: { autoexcludedUntil: Date.now() + 86400000, activo: false } });
     ok(s === 200 && get('users/BG_m1/activo') === false, 'miembro puede autoexcluirse');
@@ -99,9 +101,9 @@ setTimeout(async () => {
     ok(s === 200, 'subadmin crea código de miembro');
     [s] = await db(tSub, 'escribir', 'codigosAcceso/SA-NUEVO-2', { valor: { codigo: 'SA-NUEVO-2', generadoPor: 'BG_sub', usado: false, rol: 'director' } });
     ok(s === 403, 'subadmin NO crea códigos de director → ' + s);
-    [s] = await db(tSub, 'escribir', 'depositos/DEP-A', { valor: { depositoId: 'DEP-A', userId: 'BG_m1', moneda: 'CUP', monto: 300, fotoUrl: 'https://i.ibb.co/r.jpg', estado: 'pending', solicitadoPor: 'BG_sub' } });
+    [s] = await db(tSub, 'escribir', 'depositos/DEP-A', { valor: { depositoId: 'DEP-A', userId: 'BG_m1', moneda: 'CUP', monto: 600, fotoUrl: 'https://i.ibb.co/r.jpg', estado: 'pending', solicitadoPor: 'BG_sub' } });
     ok(s === 200, 'subadmin pide recarga para su miembro');
-    [s] = await db(tSub, 'escribir', 'depositos/DEP-B', { valor: { depositoId: 'DEP-B', userId: 'BG_otro', moneda: 'CUP', monto: 300, estado: 'pending', solicitadoPor: 'BG_sub' } });
+    [s] = await db(tSub, 'escribir', 'depositos/DEP-B', { valor: { depositoId: 'DEP-B', userId: 'BG_otro', moneda: 'CUP', monto: 600, estado: 'pending', solicitadoPor: 'BG_sub' } });
     ok(s === 403, 'subadmin NO pide recargas para extraños → ' + s);
     [s] = await llamar('POST', '/api/depositos/DEP-A/aprobar', {}, tSub);
     ok(s === 403, 'subadmin NO aprueba recargas → ' + s);
@@ -109,9 +111,9 @@ setTimeout(async () => {
     // ---- Director ----
     const antes = get('users/BG_m1/creditoReal');
     const dobles = await Promise.all([1, 2].map(() => llamar('POST', '/api/depositos/DEP-A/aprobar', {}, tDir)));
-    ok(dobles.filter(([x]) => x === 200).length === 1 && get('users/BG_m1/creditoReal') === antes + 300, 'director aprueba la recarga UNA sola vez (doble clic): ' + antes + ' → ' + get('users/BG_m1/creditoReal'));
+    ok(dobles.filter(([x]) => x === 200).length === 1 && get('users/BG_m1/creditoReal') === antes + 600, 'director aprueba la recarga UNA sola vez (doble clic): ' + antes + ' → ' + get('users/BG_m1/creditoReal'));
     [s] = await llamar('POST', '/api/solicitudes-deposito/DEP1/aprobar', {}, tDir);
-    ok(s === 200 && get('users/BG_m1/creditoReal') === antes + 500 && get('solicitudesDeposito/DEP1/estado') === 'aprobado', 'director aprueba la solicitud del miembro');
+    ok(s === 200 && get('users/BG_m1/creditoReal') === antes + 1100 && get('solicitudesDeposito/DEP1/estado') === 'aprobado', 'director aprueba la solicitud del miembro');
     [s] = await llamar('POST', '/api/admin/ajustar-saldo', { uid: 'BG_m1', tipo: 'real', monto: 50, motivo: 'x' }, tDir);
     ok(s === 403, 'director NO hace ajustes de CEO → ' + s);
 
