@@ -222,9 +222,17 @@ Decisiones de Yoel: rangos visibles **Agente** (rol interno `subadmin`) y **Supe
 - El cierre diario del agente ya NO descuenta comisión (neto = ganancia del día); la comisión llega con el cierre semanal. Los % "editables" del panel CEO (que no se usaban) se sustituyeron por la tarjeta de comisiones semanales; `guardarComisiones` y `config/comisiones` siguen existiendo sin uso.
 - Pruebas: `test/comisiones.prueba.js` (17), `test/comisiones.e2e.js` (6), `test/referidos.e2e.js` actualizado.
 
+## Etapa 12 — mínimos, tutorial y bono de inscripción (2 oct 2026)
+
+- **Mínimos** (decisión de Yoel): depósito mínimo 500 CUP (servidor + web; cambiable en `config/depositoMinimoCUP`), apuesta mínima 100.
+- **Tutorial por rango** (solo web): jugador (7 pasos), agente (6), supervisor (2), CEO (6). Sale solo la primera vez con cada rango (recordado en el móvil: `localStorage bg_tutorial_<rango>`) y se repite con el botón **?** de la cabecera. La tarjeta "¿Te avisamos?" espera a que se cierre. Prueba: `test/tutorial.e2e.js`.
+- **Bono de inscripción**: toda cuenta NUEVA recibe 100 de crédito promocional (`config/bonoInscripcion`; 0 lo apaga, tope 1000) y queda marcada con `bonoInscripcion`. Esas cuentas **no pueden retirar** hasta haber depositado (aprobado) al menos 500 CUP (`config/bonoDepositoParaRetirar`) o cualquier depósito en MLC. El servidor lleva `depositadoCUP`/`depositadoMLC` al aprobar cada depósito (campos protegidos). Las cuentas antiguas no cambian. Las reglas del promo siguen: cuota mínima 1.50 y solo la ganancia pasa a saldo real; esa ganancia cuenta como gasto en la comisión del agente (el agente no gana con bonos).
+- Antiabuso: cada cuenta necesita un código de invitación de un solo uso y el antifraude marca cuentas que comparten móvil.
+- Pruebas: `test/bono.prueba.js` (13), `test/registro.e2e.js` ampliado; `navegador.e2e.js` corregido al mínimo de 500. Versión del servidor: `etapa12`.
+
 ## Cierre de la sesión del 2 oct 2026 — pendiente para la próxima
 
-1. **Publicar la web de las Etapas 10 y 11** (el servidor estará en `etapa11`): `git -C ~/bg-frontend-privado fetch -q origin claude/upbeat-cerf-rpytdm && git -C ~/bg-frontend-privado checkout -q -B etapa3 origin/claude/upbeat-cerf-rpytdm && bash ~/bg-frontend-privado/publicar/publicar_web.sh` (copia también sw.js, manifest.json e iconos/).
+1. **Publicar la web de las Etapas 10, 11 y 12** (el servidor estará en `etapa12`): `git -C ~/bg-frontend-privado fetch -q origin claude/upbeat-cerf-rpytdm && git -C ~/bg-frontend-privado checkout -q -B etapa3 origin/claude/upbeat-cerf-rpytdm && bash ~/bg-frontend-privado/publicar/publicar_web.sh` (copia también sw.js, manifest.json e iconos/).
 2. Tras publicar: instalar la app desde Chrome, aceptar avisos, revisar "Riesgo de fraude" y que los subadmins vean a todos sus referidos.
 3. Lunes: primer aviso del ranking semanal por Telegram → revisar antifraude antes de "Entregar premios".
 4. Vigilar créditos de The Odds API (`diagnostico_cuotas.sh sincuota`).
@@ -233,7 +241,7 @@ Decisiones de Yoel: rangos visibles **Agente** (rol interno `subadmin`) y **Supe
 ## Decisiones de Yoel (2 oct 2026)
 
 - **Las claves filtradas NO se rotan** (decisión de Yoel, riesgo aceptado). Se cargan tal cual en las variables de entorno de Render. Siguen visibles en el historial público de git.
-- **Saldo promocional:** solo existe como saldo recargable, sin reglas escritas. Mientras no se definan, se aplica lo que hace el código: se apuesta con promo, los premios vuelven a promo y nunca pasa a saldo real.
+- **Saldo promocional** (actualizado en la Etapa 8): cuota mínima 1.50 y solo la GANANCIA pasa a saldo real. Bono de inscripción de 100 (Etapa 12) con retiro bloqueado hasta depositar 500 CUP.
 
 ## Reglas fijas
 
