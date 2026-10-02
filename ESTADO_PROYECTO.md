@@ -147,7 +147,7 @@ Publicada por Yoel con `publicar_todo.sh`: variables en Render (200), servidor e
 - Cabecera fija con saldo, navegación abajo, tarjeta de partido con escudos originales enfrentados y logo de liga, boleto con monto libre (atajos y validación contra saldo, maxBet y maxPago).
 - Boceto aprobado por Yoel: https://claude.ai/artifact/JMcQKrAHA94WVHSc3Hc9TG
 
-## Etapa 6 — registro desde Cuba y fotos de MMA (PREPARADA, pendiente de publicar)
+## Etapa 6 — registro desde Cuba y fotos de MMA (DESPLEGADA 2 oct 2026, 14:34 hora de Cuba; copia en publico.bak_20261002_143417; Render confirmado detrás de Cloudflare)
 
 Queja: en Cuba costaba mucho registrarse y entrar. Causas encontradas y arreglos:
 - **Límite por IP mal medido:** Render llega a través de Cloudflare; `req.ip` podía ser la IP del nodo de Cloudflare (Miami), compartida por casi toda Cuba. Con 5 registros/hora por IP, al 6.º se bloqueaba a todos. Ahora `ipCliente()` (lib/seguridad.js) usa `CF-Connecting-IP`; registro: 20 intentos **fallidos**/hora por IP (los correctos no cuentan) + tope global de 300 fallos/hora; recuperar con su propio límite (10/h).
