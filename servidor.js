@@ -29,8 +29,9 @@ app.use(idPeticion);
 app.use(cabecerasSeguras);
 app.use(corsRestringido(config.origenesPermitidos));
 app.use(express.json({ limit: '32kb', strict: true }));
-// Límite general: 120 peticiones por minuto por IP.
-app.use(limitador({ ventanaMs: 60 * 1000, maximo: 120 }));
+// Límite general por IP. Es alto a propósito: en Cuba muchos usuarios de datos
+// móviles comparten la misma IP pública de ETECSA. Los límites finos van por usuario.
+app.use(limitador({ ventanaMs: 60 * 1000, maximo: 900 }));
 
 // ==================== NOTIFICACIÓN DE ERRORES A TELEGRAM ====================
 // El token y el chat salen de variables de entorno. Si faltan, no se envía nada.
@@ -681,7 +682,8 @@ app.get('/api/health', (req, res) => {
 // ==================== AUTENTICACIÓN ====================
 // Login: 10 intentos por IP cada 15 minutos (además del bloqueo por cuenta).
 const limiteLogin = limitador({
-  ventanaMs: 15 * 60 * 1000, maximo: 10,
+  // Por IP es permisivo (IPs compartidas); el freno real es el bloqueo por cuenta (5 fallos).
+  ventanaMs: 15 * 60 * 1000, maximo: 60,
   mensaje: 'Demasiados intentos de acceso. Prueba en 15 minutos.'
 });
 app.post('/api/auth/login', limiteLogin, auth.login);
