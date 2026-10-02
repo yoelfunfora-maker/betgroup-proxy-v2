@@ -15,6 +15,7 @@ const validar = require('./lib/validacion');
 const { crearMotorApuestas, ErrorApuesta } = require('./lib/apuestas');
 const { crearRanking, semanaPorId, semanaAnterior } = require('./lib/ranking');
 const imagenes = require('./lib/imagenes');
+const { crearApiFootball } = require('./lib/apiFootball');
 const { fusionarCuotasBot } = require('./lib/mercadosBot');
 const { leerMarcador } = require('./lib/mercados');
 const { crearProxyDb } = require('./lib/proxyDb');
@@ -97,6 +98,19 @@ const operaciones = crearOperaciones({
 
 // Ranking semanal (ver lib/ranking.js).
 const ranking = crearRanking({ db, auditoria, notificarTelegram: (t) => notificarTelegram(t), escaparHtml: (t) => escaparHtml(t) });
+
+// Respaldo de cuotas de fútbol (ver lib/apiFootball.js). La clave sale de Render o, si no está,
+// de Firebase (secretos/apiFootball), donde la guarda el CEO; la web nunca puede leerla.
+let claveAFCache = { v: null, t: 0 };
+async function claveApiFootball() {
+  if (config.apiFootballKey) return config.apiFootballKey;
+  if (Date.now() - claveAFCache.t < 10 * 60 * 1000) return claveAFCache.v;
+  let v = null;
+  try { v = (await db.ref('secretos/apiFootball/clave').once('value')).val() || null; } catch { v = null; }
+  claveAFCache = { v, t: Date.now() };
+  return v;
+}
+const apiFootball = crearApiFootball({ db, obtenerClave: claveApiFootball });
 
 // ==================== CACHÉ ====================
 
@@ -378,6 +392,12 @@ function mismoHorario(evento, game) {
   return Math.abs(a - b) <= VENTANA_HORARIO_MS;
 }
 
+// ¿Los dos proveedores dan una hora de inicio (y es la misma, ±3 h)?
+function horaConocida(evento, game) {
+  const a = Date.parse(evento.horaInicio || ''), b = Date.parse(game.commence_time || '');
+  return Number.isFinite(a) && Number.isFinite(b) && Math.abs(a - b) <= VENTANA_HORARIO_MS;
+}
+
 function coincideEquipo(evento, game) {
   const localESPN = evento.local || '';
   const visitanteESPN = evento.visitante || '';
@@ -410,8 +430,19 @@ function coincideEquipo(evento, game) {
     scoreCruzado = Math.min(parecidoEquipo(localESPN, awayAPI), parecidoEquipo(visitanteESPN, homeAPI));
   }
 
-  const score = Math.max(scoreDirecto, scoreCruzado);
-  return { score, esCruzado: scoreCruzado > scoreDirecto };
+  let score = Math.max(scoreDirecto, scoreCruzado);
+  const esCruzado = scoreCruzado > scoreDirecto;
+  // Rescate: si los dos proveedores dan la MISMA hora de inicio, un equipo coincide con
+  // seguridad (≥ 0.9) y el otro se parece algo (≥ 0.4), es el mismo partido: un equipo no
+  // juega dos partidos a la vez. Así entran nombres muy distintos como
+  // "Central Córdoba (Santiago del Estero)" / "Central Cordoba SdE".
+  if (score < 0.82 && horaConocida(evento, game)) {
+    const [a, b] = esCruzado
+      ? [parecidoEquipo(localESPN, awayAPI), parecidoEquipo(visitanteESPN, homeAPI)]
+      : [parecidoEquipo(localESPN, homeAPI), parecidoEquipo(visitanteESPN, awayAPI)];
+    if (Math.max(a, b) >= 0.9 && Math.min(a, b) >= 0.4) score = 0.83;
+  }
+  return { score, esCruzado };
 }
 // ==================== FIN FUNCIONES DE SIMILITUD ====================
 
@@ -448,8 +479,17 @@ function regionDeCuotas(sportKey) {
   return sportKey.startsWith('soccer_') && !LIGAS_CON_CASAS_US.has(sportKey) ? 'eu' : 'us';
 }
 
+// Competiciones con todos los mercados (1X2 + hándicap + más/menos). El resto, solo 1X2.
+const MERCADOS_COMPLETOS = new Set([
+  'soccer_epl', 'soccer_spain_la_liga', 'soccer_italy_serie_a', 'soccer_germany_bundesliga',
+  'soccer_france_ligue_one', 'soccer_argentina_primera_division', 'basketball_nba', 'baseball_mlb'
+]);
+
 // Solo se gastan créditos en ligas con partidos en este plazo.
-const HORIZONTE_CUOTAS_MS = 48 * 60 * 60 * 1000;
+// (Antes 48 h: dejaba sin cuota los partidos de la semana siguiente. Ahora 8 días, y para
+// no gastar de más, las ligas cuyo próximo partido está lejos se refrescan cada 24 h.)
+const HORIZONTE_CUOTAS_MS = 8 * 24 * 60 * 60 * 1000;
+const CERCA_MS = 48 * 60 * 60 * 1000;
 
 // Último dato de créditos que quedan en The Odds API (para el diagnóstico del CEO).
 const estadoOddsApi = { restantes: null, usados: null, actualizado: null, ultimoError: null };
@@ -501,6 +541,64 @@ function claveOdds(evento) {
   return (typeof v === 'function' ? v(evento.liga, evento.ruta) : v) || null;
 }
 
+// Empareja cada partido de ESPN con el más parecido de la lista del proveedor y copia sus cuotas.
+// fuente: 'the-odds-api' o 'api-football' (queda anotada en el partido).
+function asignarCuotas(eventosGrupo, juegos, fuente) {
+  for (const evento of eventosGrupo) {
+    // Se busca el partido más parecido (antes se tomaba el primero que pasara el umbral).
+    let mejor = null;
+    for (const game of juegos) {
+      const r = coincideEquipo(evento, game);
+      if (r.score >= 0.82 && (!mejor || r.score > mejor.score)) mejor = { ...r, game };
+    }
+    for (const game of mejor ? [mejor.game] : []) {
+      const { score, esCruzado } = mejor;
+
+      const bookmakers = game.bookmakers?.[0];
+      if (!bookmakers?.markets) continue;
+
+      const homeApi = limpiarNombre(game.home_team || '');
+      const awayApi = limpiarNombre(game.away_team || '');
+
+      // Mercado H2H
+      const mktH2h = bookmakers.markets.find(m => m.key === 'h2h');
+      if (mktH2h?.outcomes) {
+        if (esCruzado) {
+          evento.cuota_local = mktH2h.outcomes.find(o => limpiarNombre(o.name) === awayApi)?.price || evento.cuota_local;
+          evento.cuota_visitante = mktH2h.outcomes.find(o => limpiarNombre(o.name) === homeApi)?.price || evento.cuota_visitante;
+        } else {
+          evento.cuota_local = mktH2h.outcomes.find(o => limpiarNombre(o.name) === homeApi)?.price || evento.cuota_local;
+          evento.cuota_visitante = mktH2h.outcomes.find(o => limpiarNombre(o.name) === awayApi)?.price || evento.cuota_visitante;
+        }
+        const draw = mktH2h.outcomes.find(o => o.name.toLowerCase() === 'draw');
+        if (draw) evento.cuota_empate = draw.price;
+      }
+
+      // Mercado Spreads (handicap)
+      const mktSpreads = bookmakers.markets.find(m => m.key === 'spreads');
+      if (mktSpreads?.outcomes) {
+        const homeSpread = mktSpreads.outcomes.find(o => limpiarNombre(o.name) === homeApi);
+        const awaySpread = mktSpreads.outcomes.find(o => limpiarNombre(o.name) === awayApi);
+        if (homeSpread) { evento.handicap_local = homeSpread.point; evento.handicap_local_cuota = homeSpread.price; }
+        if (awaySpread) { evento.handicap_visitante = awaySpread.point; evento.handicap_visitante_cuota = awaySpread.price; }
+      }
+
+      // Mercado Totals (over/under)
+      const mktTotals = bookmakers.markets.find(m => m.key === 'totals');
+      if (mktTotals?.outcomes) {
+        const over = mktTotals.outcomes.find(o => o.name === 'Over');
+        const under = mktTotals.outcomes.find(o => o.name === 'Under');
+        if (over) { evento.total_over_point = over.point; evento.total_over_price = over.price; }
+        if (under) { evento.total_under_point = under.point; evento.total_under_price = under.price; }
+      }
+
+      evento.fuenteCuotas = fuente;
+      console.log(`✅ Cuota asignada [${fuente}] (score: ${(score*100).toFixed(0)}%, ${esCruzado ? 'cruzada' : 'directa'}) a ${evento.local} vs ${evento.visitante}`);
+      break;
+    }
+  }
+}
+
 async function enriquecerConCuotas(eventos) {
   const apiKey = getApiKey();
   if (!apiKey) {
@@ -542,7 +640,10 @@ async function enriquecerConCuotas(eventos) {
     let juegos = null;
 
     // Usar caché si es válido (menos de 12h)
-    if (cacheEntry && (Date.now() - cacheEntry.timestamp) < 12 * 60 * 60 * 1000) {
+    // Vida de la copia: 12 h si la liga juega en las próximas 48 h; 24 h si su próximo partido está lejos.
+    const juegaPronto = eventosGrupo.some(e => { const t = Date.parse(e.horaInicio || ''); return !Number.isFinite(t) || t < ahora + CERCA_MS; });
+    const vidaCopia = (juegaPronto ? 12 : 24) * 60 * 60 * 1000;
+    if (cacheEntry && (Date.now() - cacheEntry.timestamp) < vidaCopia) {
       juegos = cacheEntry.data;
     } else if (!hayProximo) {
       continue;
@@ -553,7 +654,8 @@ async function enriquecerConCuotas(eventos) {
           console.log('🔍 MMA: Buscando cuotas para eventos de artes marciales mixtas');
         }
         // MMA solo tiene h2h, los demás tienen spreads y totals también
-        const mkts = sportKey === 'mma_mixed_martial_arts' ? 'h2h' : 'h2h,spreads,totals';
+        // Ahorro: hándicap y más/menos solo en las ligas grandes; en el resto, solo 1X2 (1 crédito en vez de 3).
+        const mkts = MERCADOS_COMPLETOS.has(sportKey) ? 'h2h,spreads,totals' : 'h2h';
         // Intentar con múltiples claves si la primera falla (ej. 401 para MMA)
         const apiKeys = config.oddsApiKeys;
         let success = false;
@@ -595,57 +697,19 @@ async function enriquecerConCuotas(eventos) {
     if (!juegos) continue;
 
     // Ahora cruzar cada evento del grupo con los juegos obtenidos
-    for (const evento of eventosGrupo) {
-      // Se busca el partido más parecido (antes se tomaba el primero que pasara el umbral).
-      let mejor = null;
-      for (const game of juegos) {
-        const r = coincideEquipo(evento, game);
-        if (r.score >= 0.82 && (!mejor || r.score > mejor.score)) mejor = { ...r, game };
-      }
-      for (const game of mejor ? [mejor.game] : []) {
-        const { score, esCruzado } = mejor;
+    asignarCuotas(eventosGrupo, juegos, 'the-odds-api');
+  }
 
-        const bookmakers = game.bookmakers?.[0];
-        if (!bookmakers?.markets) continue;
-
-        const homeApi = limpiarNombre(game.home_team || '');
-        const awayApi = limpiarNombre(game.away_team || '');
-
-        // Mercado H2H
-        const mktH2h = bookmakers.markets.find(m => m.key === 'h2h');
-        if (mktH2h?.outcomes) {
-          if (esCruzado) {
-            evento.cuota_local = mktH2h.outcomes.find(o => limpiarNombre(o.name) === awayApi)?.price || evento.cuota_local;
-            evento.cuota_visitante = mktH2h.outcomes.find(o => limpiarNombre(o.name) === homeApi)?.price || evento.cuota_visitante;
-          } else {
-            evento.cuota_local = mktH2h.outcomes.find(o => limpiarNombre(o.name) === homeApi)?.price || evento.cuota_local;
-            evento.cuota_visitante = mktH2h.outcomes.find(o => limpiarNombre(o.name) === awayApi)?.price || evento.cuota_visitante;
-          }
-          const draw = mktH2h.outcomes.find(o => o.name.toLowerCase() === 'draw');
-          if (draw) evento.cuota_empate = draw.price;
-        }
-
-        // Mercado Spreads (handicap)
-        const mktSpreads = bookmakers.markets.find(m => m.key === 'spreads');
-        if (mktSpreads?.outcomes) {
-          const homeSpread = mktSpreads.outcomes.find(o => limpiarNombre(o.name) === homeApi);
-          const awaySpread = mktSpreads.outcomes.find(o => limpiarNombre(o.name) === awayApi);
-          if (homeSpread) { evento.handicap_local = homeSpread.point; evento.handicap_local_cuota = homeSpread.price; }
-          if (awaySpread) { evento.handicap_visitante = awaySpread.point; evento.handicap_visitante_cuota = awaySpread.price; }
-        }
-
-        // Mercado Totals (over/under)
-        const mktTotals = bookmakers.markets.find(m => m.key === 'totals');
-        if (mktTotals?.outcomes) {
-          const over = mktTotals.outcomes.find(o => o.name === 'Over');
-          const under = mktTotals.outcomes.find(o => o.name === 'Under');
-          if (over) { evento.total_over_point = over.point; evento.total_over_price = over.price; }
-          if (under) { evento.total_under_point = under.point; evento.total_under_price = under.price; }
-        }
-
-        console.log(`✅ Cuota asignada (score: ${(score*100).toFixed(0)}%, ${esCruzado ? 'cruzada' : 'directa'}) a ${evento.local} vs ${evento.visitante}`);
-        break;
-      }
+  // Respaldo gratuito: fútbol que se quedó sin cuota → API-Football (una consulta por liga y día).
+  const sinCuota = eventos.filter(e => e.sport === 'soccer' && e.estado === 'scheduled' && !(Number(e.cuota_local) > 1) && apiFootball.LIGAS[e.ruta]);
+  const porRuta = {};
+  for (const e of sinCuota) (porRuta[e.ruta] = porRuta[e.ruta] || []).push(e);
+  for (const [ruta, grupo] of Object.entries(porRuta)) {
+    try {
+      const juegos = await apiFootball.partidos(ruta);
+      if (juegos && juegos.length) asignarCuotas(grupo, juegos, 'api-football');
+    } catch (err) {
+      console.warn(`API-Football ${ruta}: ${err.message}`);
     }
   }
   // Sin cuota real NO se inventa ninguna (antes se pedía a una IA o se generaba "al azar"
@@ -744,7 +808,7 @@ app.get('/api/ping', (req, res) => {
 
 // Versión del servidor: el script de publicación espera a que Render tenga esta antes de subir la web.
 app.get('/api/version', (req, res) => {
-  res.json({ version: 'etapa8' });
+  res.json({ version: 'etapa9' });
 });
 
 app.get('/api/health', (req, res) => {
@@ -799,6 +863,7 @@ app.get('/api/admin/diagnostico-cuotas', soloCEO, operacion(async (req) => {
     : todos.filter(e => limpiarNombre(`${e.local} ${e.visitante}`).includes(q)).slice(0, 5);
   return {
     creditosOddsApi: estadoOddsApi,
+    apiFootball: apiFootball.estado,
     partidos: eventos.map(e => {
       const sportKey = claveOdds(e);
       const juegos = (sportKey && oddsCache[sportKey]?.data) || [];
@@ -808,9 +873,9 @@ app.get('/api/admin/diagnostico-cuotas', soloCEO, operacion(async (req) => {
       // Explicación en palabras de por qué tiene (o no) cuota.
       const faltaMs = Date.parse(e.horaInicio || '') - Date.now();
       let motivo;
-      if (Number(e.cuota_local) > 1) motivo = 'Tiene cuota';
+      if (Number(e.cuota_local) > 1) motivo = `Tiene cuota (${e.fuenteCuotas || 'bot'})`;
       else if (!sportKey) motivo = 'Esta competición no está conectada a The Odds API';
-      else if (faltaMs > HORIZONTE_CUOTAS_MS && !juegos.length) motivo = 'Faltan más de 48 h: las cuotas se piden 2 días antes del partido (ahorro de créditos)';
+      else if (faltaMs > HORIZONTE_CUOTAS_MS && !juegos.length) motivo = 'Faltan más de 8 días: las cuotas se piden una semana antes';
       else if (!juegos.length) motivo = 'The Odds API no devolvió partidos de esta competición (o no quedan créditos)';
       else motivo = 'Ningún partido de The Odds API coincide (revisar nombres en mejoresCandidatos)';
       return {
@@ -865,6 +930,21 @@ app.post('/api/imagen', requerirSesion, limiteFotos, express.raw({ type: 'image/
   return { url };
 }));
 
+// El CEO guarda la clave de API-Football (se comprueba antes; nunca se devuelve ni se registra).
+app.post('/api/admin/clave-api-football', soloCEO, operacion(async (req) => {
+  const clave = typeof req.body?.clave === 'string' ? req.body.clave.trim() : '';
+  if (!/^[A-Za-z0-9]{20,64}$/.test(clave)) throw new ErrorOperacion(400, 'La clave no tiene el formato esperado (letras y números, sin espacios)');
+  let info;
+  try { info = await apiFootball.probarClave(clave); } catch (e) {
+    throw new ErrorOperacion(400, 'API-Football no aceptó la clave: ' + String(e.message).slice(0, 120));
+  }
+  await db.ref('secretos/apiFootball').set({ clave, guardadaEn: Date.now(), por: req.usuario.uid });
+  claveAFCache = { v: clave, t: Date.now() };
+  // Recalcula ya los partidos para que las cuotas de respaldo aparezcan sin esperar 3 minutos.
+  precalentarCache().catch(e => console.error('Recalcular partidos:', e.message));
+  await auditoria.registrarSeguro({ accion: 'clave_api_football_guardada', actor: req.usuario.uid, requestId: req.id, detalles: { plan: info.plan } });
+  return { guardada: true, ...info };
+}));
 // Liquidación automática bajo demanda (el CEO no tiene que esperar los 30 min).
 app.post('/api/admin/liquidar-ahora', soloCEO, operacion(async () => ({ liquidadas: await liquidarApuestasAutomatico() })));
 // Avisos a Telegram desde el navegador: el token ya no viaja al frontend.
