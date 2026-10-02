@@ -4,7 +4,7 @@ const { spawnSync } = require('child_process');
 const path = require('path');
 
 let fallos = 0;
-for (const archivo of ['seguridad.prueba.js', 'dinero.prueba.js', 'permisos.prueba.js', 'liquidacion.prueba.js', 'registro.prueba.js']) {
+for (const archivo of ['seguridad.prueba.js', 'dinero.prueba.js', 'permisos.prueba.js', 'liquidacion.prueba.js', 'registro.prueba.js', 'cuotas.prueba.js']) {
   const r = spawnSync(process.execPath, [path.join(__dirname, archivo)], { encoding: 'utf8', timeout: 60000 });
   const lineas = (r.stdout + r.stderr).split('\n').filter(l => /^(✅|❌) /.test(l) && !/Firebase Admin|Caché|escuchando/.test(l));
   console.log(`\n== ${archivo} ==`);

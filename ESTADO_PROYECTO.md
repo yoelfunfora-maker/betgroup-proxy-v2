@@ -160,6 +160,15 @@ Queja: en Cuba costaba mucho registrarse y entrar. Causas encontradas y arreglos
 - Nueva ruta `GET /api/version` → `{version:'etapa6'}` (la usa `publicar_web.sh`).
 - Pruebas: `npm test` (5 archivos, + `registro.prueba.js`), `test/navegador.e2e.js` y `test/registro.e2e.js` (9 comprobaciones en navegador con servidor dormido simulado).
 
+## Etapa 7 — cuotas de ligas con nombre "raro" en ESPN (PREPARADA, pendiente de publicar)
+
+Caso: "Independiente vs Instituto" (Argentina) salía sin cuota.
+- La competición de The Odds API se elegía por el NOMBRE de liga de ESPN. "Argentine Liga Profesional" no contiene "argentina", "Spanish LALIGA" no contiene "la liga", "Brazilian Serie A" caía en Italia... y todo acababa pidiendo `soccer_epl`. Ahora `ODDS_POR_RUTA` usa la ruta de ESPN (`soccer/arg.1` → `soccer_argentina_primera_division`); liga desconocida → no se pide nada (ahorra créditos).
+- Región: fútbol fuera de EE. UU./México/Premier usa casas europeas (`regions=eu`), mismo coste.
+- Nombres: "Instituto" ⊂ "Instituto de Córdoba", "CA Independiente" = "Independiente" (palabras vacías fuera), siempre exigiendo los dos equipos y la misma hora (±3 h). Se elige la mejor coincidencia, no la primera.
+- `GET /api/admin/diagnostico-cuotas?q=<equipo>` (solo CEO) y `publicar/diagnostico_cuotas.sh` en el repo de la web: muestra competición, candidatos, parecido y créditos restantes de The Odds API.
+- Pruebas: `test/cuotas.prueba.js` (9 comprobaciones; con el código anterior fallan 5).
+
 ## Decisiones de Yoel (2 oct 2026)
 
 - **Las claves filtradas NO se rotan** (decisión de Yoel, riesgo aceptado). Se cargan tal cual en las variables de entorno de Render. Siguen visibles en el historial público de git.

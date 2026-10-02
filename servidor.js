@@ -325,6 +325,38 @@ function tieneCodigoISO(nombre) {
   return isoMap[limpiarNombre(nombre)] || null;
 }
 
+// Palabras que no distinguen a un equipo ("CA Independiente" = "Independiente",
+// "Instituto de Córdoba" ≈ "Instituto"). Las que sí distinguen (city, united, real...) se quedan.
+const PALABRAS_VACIAS = new Set(['ca', 'cd', 'cs', 'sd', 'ud', 'sad', 'de', 'del', 'la', 'el', 'los', 'las', 'y', 'e']);
+function fichasEquipo(nombre) {
+  return new Set(limpiarNombre(nombre).split(' ').filter(t => t.length > 1 && !PALABRAS_VACIAS.has(t)));
+}
+
+// Parecido entre dos nombres del mismo equipo (0 a 1).
+function parecidoEquipo(a, b) {
+  const la = limpiarNombre(a), lb = limpiarNombre(b);
+  if (!la || !lb) return 0;
+  if (la === lb) return 1;
+  const fa = fichasEquipo(a), fb = fichasEquipo(b);
+  // Todas las palabras del nombre corto están en el largo: es el mismo club escrito más largo.
+  // (Para evitar confusiones como "Independiente" / "Independiente Rivadavia" se exige además
+  // que coincida el rival y la hora del partido: ver coincideEquipo.)
+  if (fa.size && fb.size) {
+    const [corto, largo] = fa.size <= fb.size ? [fa, fb] : [fb, fa];
+    if ([...corto].every(t => largo.has(t))) return 0.9;
+  }
+  return sorensenDice(la, lb) * 0.6 + jaccardTokens(la, lb) * 0.4;
+}
+
+// Los dos proveedores deben hablar del mismo partido: inicio con menos de 3 h de diferencia.
+const VENTANA_HORARIO_MS = 3 * 60 * 60 * 1000;
+function mismoHorario(evento, game) {
+  const a = Date.parse(evento.horaInicio || '');
+  const b = Date.parse(game.commence_time || '');
+  if (!Number.isFinite(a) || !Number.isFinite(b)) return true; // sin hora no se puede descartar
+  return Math.abs(a - b) <= VENTANA_HORARIO_MS;
+}
+
 function coincideEquipo(evento, game) {
   const localESPN = evento.local || '';
   const visitanteESPN = evento.visitante || '';
@@ -336,7 +368,10 @@ function coincideEquipo(evento, game) {
     return { score: 0, esCruzado: false };
   }
 
-  // 2. Verificar códigos ISO para selecciones
+  // 2. Otro horario = otro partido (p. ej. la jornada siguiente con un rival parecido)
+  if (!mismoHorario(evento, game)) return { score: 0, esCruzado: false };
+
+  // 3. Verificar códigos ISO para selecciones
   const isoLocalESPN = tieneCodigoISO(localESPN);
   const isoVisitanteESPN = tieneCodigoISO(visitanteESPN);
   const isoHomeAPI = tieneCodigoISO(homeAPI);
@@ -348,22 +383,52 @@ function coincideEquipo(evento, game) {
     scoreDirecto = (isoLocalESPN === isoHomeAPI && isoVisitanteESPN === isoAwayAPI) ? 1.0 : 0;
     scoreCruzado = (isoLocalESPN === isoAwayAPI && isoVisitanteESPN === isoHomeAPI) ? 1.0 : 0;
   } else {
-    const localL = limpiarNombre(localESPN);
-    const visitL = limpiarNombre(visitanteESPN);
-    const homeL = limpiarNombre(homeAPI);
-    const awayL = limpiarNombre(awayAPI);
-
     // Tienen que parecerse LOS DOS equipos (antes bastaba uno: "Chelsea vs X" recibía
     // las cuotas de "Chelsea vs Y"). Se toma el peor de los dos parecidos.
-    const parecido = (a, b) => sorensenDice(a, b) * 0.6 + jaccardTokens(a, b) * 0.4;
-    scoreDirecto = Math.min(parecido(localL, homeL), parecido(visitL, awayL));
-    scoreCruzado = Math.min(parecido(localL, awayL), parecido(visitL, homeL));
+    scoreDirecto = Math.min(parecidoEquipo(localESPN, homeAPI), parecidoEquipo(visitanteESPN, awayAPI));
+    scoreCruzado = Math.min(parecidoEquipo(localESPN, awayAPI), parecidoEquipo(visitanteESPN, homeAPI));
   }
 
   const score = Math.max(scoreDirecto, scoreCruzado);
   return { score, esCruzado: scoreCruzado > scoreDirecto };
 }
 // ==================== FIN FUNCIONES DE SIMILITUD ====================
+
+// Competición de ESPN → competición en The Odds API. Antes se adivinaba por el NOMBRE de la
+// liga y fallaba: ESPN escribe "Argentine Liga Profesional" ("argentine" ≠ "argentina"),
+// "Spanish LALIGA", "Brazilian Serie A" (caía en Italia)... y todo eso acababa pidiendo
+// las cuotas de la Premier League inglesa, donde esos partidos no existen → partido bloqueado.
+const ODDS_POR_RUTA = Object.freeze({
+  'soccer/eng.1': 'soccer_epl',
+  'soccer/esp.1': 'soccer_spain_la_liga',
+  'soccer/ger.1': 'soccer_germany_bundesliga',
+  'soccer/ita.1': 'soccer_italy_serie_a',
+  'soccer/fra.1': 'soccer_france_ligue_one',
+  'soccer/usa.1': 'soccer_usa_mls',
+  'soccer/mex.1': 'soccer_mexico_ligamx',
+  'soccer/bra.1': 'soccer_brazil_campeonato',
+  'soccer/ned.1': 'soccer_netherlands_eredivisie',
+  'soccer/arg.1': 'soccer_argentina_primera_division',
+  'soccer/por.1': 'soccer_portugal_primeira_liga',
+  'soccer/nor.1': 'soccer_norway_eliteserien',
+  'soccer/swe.1': 'soccer_sweden_allsvenskan',
+  'soccer/den.1': 'soccer_denmark_superliga',
+  'soccer/pol.1': 'soccer_poland_ekstraklasa',
+  'soccer/rus.1': 'soccer_russia_premier_league',
+  'soccer/chi.1': 'soccer_chile_campeonato',
+  'soccer/conmebol.libertadores': 'soccer_conmebol_copa_libertadores',
+  'soccer/fifa.world': 'soccer_fifa_world_cup'
+});
+
+// Casas de apuestas de EE. UU. para deportes y ligas de allí (y la Premier, que cubren bien);
+// casas europeas para el resto del fútbol (cubren Sudamérica y Europa). Mismo coste: 1 región.
+const LIGAS_CON_CASAS_US = new Set(['soccer_epl', 'soccer_usa_mls', 'soccer_mexico_ligamx']);
+function regionDeCuotas(sportKey) {
+  return sportKey.startsWith('soccer_') && !LIGAS_CON_CASAS_US.has(sportKey) ? 'eu' : 'us';
+}
+
+// Último dato de créditos que quedan en The Odds API (para el diagnóstico del CEO).
+const estadoOddsApi = { restantes: null, usados: null, actualizado: null, ultimoError: null };
 
 async function enriquecerConCuotas(eventos) {
   const apiKey = getApiKey();
@@ -373,7 +438,8 @@ async function enriquecerConCuotas(eventos) {
   }
 
   const sportKeyMap = {
-    'soccer': function(liga) {
+    'soccer': function(liga, ruta) {
+      if (ruta && ODDS_POR_RUTA[ruta]) return ODDS_POR_RUTA[ruta];
       const l = (liga || '').toLowerCase();
       if (l.includes('world') || l.includes('fifa')) return 'soccer_fifa_world_cup';
       if (l.includes('mls')) return 'soccer_usa_mls';
@@ -405,7 +471,7 @@ async function enriquecerConCuotas(eventos) {
       if (l.includes('belgium')) return 'soccer_belgium_first_div';
       if (l.includes('austria')) return 'soccer_austria_bundesliga';
       if (l.includes('greece')) return 'soccer_greece_super_league';
-      return 'soccer_epl';
+      return null; // liga desconocida: no se gastan créditos pidiendo otra liga que no es
     },
     'basketball': 'basketball_nba',
     'baseball': 'baseball_mlb',
@@ -417,7 +483,7 @@ async function enriquecerConCuotas(eventos) {
   const grupos = {};
   for (const evento of eventos) {
     const sportKey = typeof sportKeyMap[evento.sport] === 'function' 
-      ? sportKeyMap[evento.sport](evento.liga) 
+      ? sportKeyMap[evento.sport](evento.liga, evento.ruta) 
       : sportKeyMap[evento.sport];
     if (!sportKey) continue;
     if (!grupos[sportKey]) grupos[sportKey] = [];
@@ -445,8 +511,12 @@ async function enriquecerConCuotas(eventos) {
         let success = false;
         for (const key of apiKeys) {
           try {
-            const url = `https://api.the-odds-api.com/v4/sports/${sportKey}/odds?apiKey=${key}&markets=${mkts}&regions=us`;
+            const url = `https://api.the-odds-api.com/v4/sports/${sportKey}/odds?apiKey=${key}&markets=${mkts}&regions=${regionDeCuotas(sportKey)}`;
             const response = await axios.get(url, { timeout: 5000 });
+            const restantes = Number(response.headers?.['x-requests-remaining']);
+            if (Number.isFinite(restantes)) {
+              Object.assign(estadoOddsApi, { restantes, usados: Number(response.headers['x-requests-used']) || null, actualizado: new Date().toISOString() });
+            }
             if (response.data) {
               juegos = response.data.data || response.data;
               oddsCache[sportKey] = { data: juegos, timestamp: Date.now() };
@@ -454,6 +524,7 @@ async function enriquecerConCuotas(eventos) {
               break;
             }
           } catch(innerErr) {
+            estadoOddsApi.ultimoError = `${sportKey}: ${innerErr.response?.status || innerErr.code || 'error'} (${new Date().toISOString()})`;
             console.warn(`  Una clave de The Odds API falló (${innerErr.response?.status || innerErr.code || 'error'})`);
             continue;
           }
@@ -471,9 +542,14 @@ async function enriquecerConCuotas(eventos) {
 
     // Ahora cruzar cada evento del grupo con los juegos obtenidos
     for (const evento of eventosGrupo) {
+      // Se busca el partido más parecido (antes se tomaba el primero que pasara el umbral).
+      let mejor = null;
       for (const game of juegos) {
-        const { score, esCruzado } = coincideEquipo(evento, game);
-        if (score < 0.82) continue;
+        const r = coincideEquipo(evento, game);
+        if (r.score >= 0.82 && (!mejor || r.score > mejor.score)) mejor = { ...r, game };
+      }
+      for (const game of mejor ? [mejor.game] : []) {
+        const { score, esCruzado } = mejor;
 
         const bookmakers = game.bookmakers?.[0];
         if (!bookmakers?.markets) continue;
@@ -614,7 +690,7 @@ app.get('/api/ping', (req, res) => {
 
 // Versión del servidor: el script de publicación espera a que Render tenga esta antes de subir la web.
 app.get('/api/version', (req, res) => {
-  res.json({ version: 'etapa6' });
+  res.json({ version: 'etapa7' });
 });
 
 app.get('/api/health', (req, res) => {
@@ -658,6 +734,30 @@ app.post('/api/admin/ajustar-saldo', soloCEO, operacion((req) => operaciones.aju
 app.post('/api/admin/asignar-rol', soloCEO, operacion((req) => operaciones.asignarRol(req)));
 app.post('/api/admin/restablecer-clave', soloCEO, operacion((req) => operaciones.restablecerClave(req)));
 app.post('/api/admin/eliminar-usuario', soloCEO, operacion((req) => operaciones.eliminarUsuario(req)));
+// Diagnóstico de cuotas: ¿por qué un partido sale sin cuota? (busca por nombre de equipo)
+app.get('/api/admin/diagnostico-cuotas', soloCEO, operacion(async (req) => {
+  const q = limpiarNombre(validar.texto(req.query?.q, 60) || '');
+  if (q.length < 3) throw new ErrorOperacion(400, 'Escribe al menos 3 letras de un equipo');
+  const eventos = (getCache('fixtures')?.data || []).filter(e => limpiarNombre(`${e.local} ${e.visitante}`).includes(q)).slice(0, 5);
+  return {
+    creditosOddsApi: estadoOddsApi,
+    partidos: eventos.map(e => {
+      const sportKey = e.sport === 'soccer' ? (ODDS_POR_RUTA[e.ruta] || null) : null;
+      const juegos = (sportKey && oddsCache[sportKey]?.data) || [];
+      const candidatos = juegos
+        .map(g => ({ partidoOddsApi: `${g.home_team} vs ${g.away_team}`, inicio: g.commence_time, casas: (g.bookmakers || []).length, parecido: Number(coincideEquipo(e, g).score.toFixed(2)) }))
+        .sort((a, b) => b.parecido - a.parecido).slice(0, 3);
+      return {
+        partido: `${e.local} vs ${e.visitante}`, liga: e.liga, ruta: e.ruta, inicio: e.horaInicio,
+        competicionOddsApi: sportKey, region: sportKey ? regionDeCuotas(sportKey) : null,
+        cuotas: { local: e.cuota_local, empate: e.cuota_empate, visitante: e.cuota_visitante },
+        partidosEnOddsApi: juegos.length,
+        cacheCuotas: sportKey && oddsCache[sportKey] ? new Date(oddsCache[sportKey].timestamp).toISOString() : null,
+        mejoresCandidatos: candidatos
+      };
+    })
+  };
+}));
 // Liquidación automática bajo demanda (el CEO no tiene que esperar los 30 min).
 app.post('/api/admin/liquidar-ahora', soloCEO, operacion(async () => ({ liquidadas: await liquidarApuestasAutomatico() })));
 // Avisos a Telegram desde el navegador: el token ya no viaja al frontend.
