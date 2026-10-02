@@ -129,6 +129,17 @@ Publicada por Yoel con `publicar_todo.sh`: variables en Render (200), servidor e
 4. `3_cerrar_reglas.sh` — reglas cerradas (con copia de las antiguas).
 - Emergencia: `revertir.sh`.
 
+## Etapa 4 — liquidación completa (2 oct 2026)
+
+- `lib/mercados.js`: 1X2, hándicap (`Handicap <equipo> (±N)`) y más/menos (`Over/Under N`). Cuota del servidor y resolución con marcador; línea exacta = devolución.
+- Liquidación automática (cada 30 min o `POST /api/admin/liquidar-ahora`): todas las competiciones de `DEPORTES`, consultando ESPN en la fecha de cada partido (las apuestas guardan `ruta` y `horaInicio`). Tenis/UFC por ganador. Cancelado → se devuelve; aplazado → se devuelve tras 48 h.
+- Manual (CEO): `/api/apuestas/liquidar` con `marcador: "2-1"`, `resultadoGanador` o `ANULADA`. Tarjeta en el panel CEO.
+- Sin cuotas inventadas (IA/azar eliminadas): partido sin cuota real = bloqueado.
+- Emparejamiento de cuotas: exige los dos equipos; ya no borra "city"/"united".
+- `/api/admin/eliminar-usuario`: borrado completo (no si hay saldo o apuestas pendientes).
+- Pruebas: `npm test` (4 archivos) y `test/navegador.e2e.js` (16 comprobaciones).
+- Pendiente conocido: caché de cuotas de The Odds API de 12 h (cuota gratuita limitada); como solo se apuesta antes del partido, es aceptable.
+
 ## Decisiones de Yoel (2 oct 2026)
 
 - **Las claves filtradas NO se rotan** (decisión de Yoel, riesgo aceptado). Se cargan tal cual en las variables de entorno de Render. Siguen visibles en el historial público de git.
