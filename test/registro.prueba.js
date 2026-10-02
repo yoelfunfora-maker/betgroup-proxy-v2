@@ -39,7 +39,7 @@ async function desde(ip, url, cuerpo) {
 }
 const persona = (i, extra = {}) => ({
   nombre: `Persona ${i}`, telefono: `53 5${String(i).padStart(7, '0')}`,
-  email: `persona${i}@nauta.cu`, password: 'clave-segura-1', codigo: `CUBA-${i}`, ...extra
+  email: `persona${i}@nauta.cu`, password: 'clave-segura-1', codigo: `CUBA-${i}`, apodo: `Fiera_${i}`, ...extra
 });
 
 (async () => {
@@ -70,13 +70,13 @@ const persona = (i, extra = {}) => ({
     ok(sl === 200, 'inicia sesión escribiendo el correo con mayúsculas');
 
     // ---- Correo repetido: le dice que inicie sesión ----
-    [s, j] = await desde('152.206.1.2', '/api/auth/registro', persona(14, { email: 'persona1@nauta.cu' }));
+    [s, j] = await desde('152.206.1.2', '/api/auth/registro', persona(14, { email: 'persona1@nauta.cu', apodo: 'Fiera_otra' }));
     ok(s === 409 && /Iniciar sesión/.test(j.error), 'correo ya registrado: le indica iniciar sesión');
 
     // ---- Quien prueba códigos al azar sí se frena (solo cuentan los fallos) ----
     let frenado = false;
     for (let i = 0; i < 25; i++) {
-      [s] = await desde('200.0.0.66', '/api/auth/registro', persona(20, { codigo: 'AZAR-' + i, email: `azar${i}@x.cu` }));
+      [s] = await desde('200.0.0.66', '/api/auth/registro', persona(20, { codigo: 'AZAR-' + i, email: `azar${i}@x.cu`, apodo: `Azar_${i}` }));
       if (s === 429) { frenado = i; break; }
     }
     ok(frenado === 20, 'adivinar códigos se frena tras 20 fallos → intento ' + frenado);
@@ -85,7 +85,7 @@ const persona = (i, extra = {}) => ({
 
     // ---- Versión del servidor para el script de publicación ----
     const v = await (await fetchReal('http://127.0.0.1:3995/api/version')).json();
-    ok(v.version === 'etapa7', 'el servidor anuncia su versión (etapa7)');
+    ok(v.version === 'etapa8', 'el servidor anuncia su versión (etapa8)');
 
     // ---- Fotos de los luchadores de MMA ----
     let evs = [];

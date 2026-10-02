@@ -132,7 +132,7 @@ setTimeout(async () => {
     ok(s === 200 && (await entrar('m3@x.com', j.claveTemporal)), 'CEO genera contraseña temporal y funciona');
 
     // ---- Registro ----
-    const nuevo = { nombre: 'Nuevo', telefono: '5355599999', email: 'nuevo@x.com', password: 'clave-nueva-1', codigo: 'MBR-LIBRE1' };
+    const nuevo = { nombre: 'Nuevo', telefono: '5355599999', email: 'nuevo@x.com', password: 'clave-nueva-1', codigo: 'MBR-LIBRE1', apodo: 'Halcon_99' };
     [s] = await llamar('POST', '/api/auth/registro', { ...nuevo, password: 'corta' });
     ok(s === 400, 'contraseña corta rechazada → ' + s);
     [s] = await llamar('POST', '/api/auth/registro', { ...nuevo, nombre: '<script>alert(1)</script>' });
@@ -142,7 +142,7 @@ setTimeout(async () => {
     ok(get(`users/${j.uid}/rol`) === 'member' && get(`users/${j.uid}/referidoPorUid`) === 'BG_ceo', 'el nuevo usuario es miembro y queda ligado a quien creó el código');
     ok(!get('credenciales_acceso/nuevo-x-com/hash'), 'no se guarda ningún hash legible');
     ok(Boolean(await entrar('nuevo@x.com', 'clave-nueva-1')), 'el nuevo usuario inicia sesión');
-    [s] = await llamar('POST', '/api/auth/registro', { ...nuevo, email: 'otro2@x.com' });
+    [s] = await llamar('POST', '/api/auth/registro', { ...nuevo, email: 'otro2@x.com', apodo: 'Otro_Halcon' });
     ok(s === 400, 'código ya usado rechazado → ' + s);
     [s, j] = await llamar('POST', '/api/auth/recuperar', { identificador: 'noexiste@x.com' });
     ok(s === 200 && /Si la cuenta existe/.test(j.mensaje), 'recuperar no revela si el usuario existe');
