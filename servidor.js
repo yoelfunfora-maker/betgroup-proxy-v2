@@ -4,11 +4,77 @@ const https = require('https');
 const admin = require('firebase-admin');
 const axios = require('axios');
 
+const crypto = require('crypto');
+
 const app = express();
 const PORT = process.env.PORT || 3000;
 
+app.disable('x-powered-by');
 app.use(cors());
-app.use(express.json());
+// Las rutas con imágenes llevan su propio límite de tamaño más abajo
+const jsonPorDefecto = express.json({ limit: '100kb' });
+app.use((req, res, next) => (req.path === '/api/subir-imagen' ? next() : jsonPorDefecto(req, res, next)));
+
+// Cabeceras básicas de seguridad en todas las respuestas
+app.use((req, res, next) => {
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  res.setHeader('X-Frame-Options', 'DENY');
+  res.setHeader('Referrer-Policy', 'no-referrer');
+  next();
+});
+
+// ==================== CANDADO DE ADMINISTRADOR ====================
+// Las rutas de administración exigen la cabecera "x-admin-key" igual a ADMIN_API_KEY.
+// Si ADMIN_API_KEY no está configurada, las rutas quedan CERRADAS (nunca abiertas).
+const ADMIN_API_KEY = process.env.ADMIN_API_KEY || '';
+const SELF_URL = (process.env.SELF_URL || 'https://betgroup-proxy-v2-8vqj.onrender.com').replace(/\/+$/, '');
+
+function huella(valor) {
+  return crypto.createHash('sha256').update(String(valor)).digest();
+}
+
+function requireAdmin(req, res, next) {
+  if (!ADMIN_API_KEY) {
+    return res.status(503).json({ error: 'Ruta de administración desactivada' });
+  }
+  const enviada = req.get('x-admin-key') || '';
+  // Comparación en tiempo constante para no filtrar la clave por tiempos de respuesta
+  if (!crypto.timingSafeEqual(huella(enviada), huella(ADMIN_API_KEY))) {
+    return res.status(401).json({ error: 'No autorizado' });
+  }
+  next();
+}
+
+// ==================== LÍMITE DE PETICIONES (por IP, en memoria) ====================
+const contadoresPeticiones = new Map();
+
+function limitarPeticiones(maximo, ventanaMs) {
+  return (req, res, next) => {
+    const clave = req.path + '|' + (req.get('x-forwarded-for') || req.ip || '').split(',')[0].trim();
+    const ahora = Date.now();
+    const entrada = contadoresPeticiones.get(clave);
+    if (!entrada || ahora - entrada.inicio > ventanaMs) {
+      contadoresPeticiones.set(clave, { inicio: ahora, cuenta: 1 });
+      return next();
+    }
+    entrada.cuenta++;
+    if (entrada.cuenta > maximo) {
+      return res.status(429).json({ error: 'Demasiadas peticiones, espera un momento' });
+    }
+    next();
+  };
+}
+
+// Limpieza periódica para que el mapa no crezca sin límite
+setInterval(() => {
+  const ahora = Date.now();
+  for (const [clave, entrada] of contadoresPeticiones) {
+    if (ahora - entrada.inicio > 10 * 60 * 1000) contadoresPeticiones.delete(clave);
+  }
+}, 5 * 60 * 1000).unref();
+
+// Los UID de Firebase solo llevan letras, números, guion y guion bajo
+const UID_VALIDO = /^[A-Za-z0-9_-]{10,128}$/;
 
 // ==================== FIREBASE ====================
 
@@ -666,7 +732,7 @@ app.get('/api/fixtures', async (req, res) => {
   }
 });
 
-app.post('/api/apostar', async (req, res) => {
+app.post('/api/apostar', requireAdmin, async (req, res) => {
   const { uid, amount, evento, tipo, cuota, tipoSaldo } = req.body;
   if (!uid || !amount || !evento || !tipo || !cuota) {
     return res.status(400).json({ error: 'Parámetros faltantes' });
@@ -706,7 +772,7 @@ app.post('/api/apostar', async (req, res) => {
 
 // ==================== ENDPOINT SALDO REAL ====================
 
-app.get('/api/saldo/:uid', async (req, res) => {
+app.get('/api/saldo/:uid', limitarPeticiones(60, 60 * 1000), async (req, res) => {
   const { uid } = req.params;
 
   if (!uid || uid.length < 10) {
@@ -766,7 +832,7 @@ app.post('/api/huggingface/cuotas', async (req, res) => {
 
 
 
-app.get('/api/agents-status', async (req, res) => {
+app.get('/api/agents-status', requireAdmin, async (req, res) => {
   const geminiKey = GEMINI_API_KEY;
   const groqKey   = GROQ_API_KEY;
   const status = { Geminis02: 'unknown', Agente_groc01: 'unknown', Athos_Tavily: 'unknown' };
@@ -801,7 +867,7 @@ app.get('/api/agents-status', async (req, res) => {
 
 // ==================== CHATBOT AGENTE_GROC01 ====================
 
-app.post('/api/chat', async (req, res) => {
+app.post('/api/chat', limitarPeticiones(10, 60 * 1000), async (req, res) => {
   const { mensaje } = req.body;
   if (!mensaje || typeof mensaje !== 'string' || mensaje.trim().length === 0) {
     return res.status(400).json({ error: 'Mensaje vacío o inválido' });
@@ -878,39 +944,6 @@ Pregunta del usuario: "${mensaje.trim()}"`;
 
 // ==================== VERIFICADOR GEMINIS02 ====================
 
-async function obtenerEstadoSistema() {
-  const estado = { proxy: 'ok', agentes: {}, eventos: 0, chatbot: false, saldo_firebase: null, saldo_endpoint: null };
-  try {
-    const agents = await axios.get('https://betgroup-proxy-v2.onrender.com/api/agents-status', { timeout: 5000 });
-    estado.agentes = agents.data?.agents || {};
-  } catch(e) { estado.agentes = { error: e.message }; }
-
-  try {
-    const fixtures = await axios.get('https://betgroup-proxy-v2.onrender.com/api/fixtures', { timeout: 5000 });
-    estado.eventos = fixtures.data?.total || 0;
-  } catch(e) { estado.eventos = -1; }
-
-  try {
-    const chat = await axios.post('https://betgroup-proxy-v2.onrender.com/api/chat',
-      { mensaje: 'Test' }, { timeout: 5000 });
-    estado.chatbot = chat.data?.success || false;
-  } catch(e) { estado.chatbot = false; }
-
-  // Leer saldo de usuario de prueba directamente desde Firebase
-  try {
-    const snap = await db.ref('users/BG_mq7rch3t_h6sjfs1h/creditoReal').once('value');
-    estado.saldo_firebase = snap.val();
-  } catch(e) { estado.saldo_firebase = 'error'; }
-
-  // Leer saldo desde el endpoint /api/saldo
-  try {
-    const resp = await axios.get('https://betgroup-proxy-v2.onrender.com/api/saldo/BG_mq7rch3t_h6sjfs1h', { timeout: 5000 });
-    estado.saldo_endpoint = resp.data?.creditoReal;
-  } catch(e) { estado.saldo_endpoint = 'error'; }
-
-  return estado;
-}
-
 async function notificarTelegram(texto) {
   if (!TELEGRAM_BOT_TOKEN || !TELEGRAM_CHAT_ID) return;
   try {
@@ -922,16 +955,20 @@ async function notificarTelegram(texto) {
   } catch(e) { console.error('Error notificando a Telegram:', e.message); }
 }
 
-app.get('/api/verificacion-geminis', async (req, res) => {
+app.get('/api/verificacion-geminis', requireAdmin, async (req, res) => {
   try {
     const estado = { proxy: 'ok', agentes: {}, eventos: 0, chatbot: false, saldo_firebase: null, saldo_endpoint: null };
     
+    // Se verifica a sí mismo en su URL real (antes apuntaba a un host equivocado sin "-8vqj")
+    const base = SELF_URL;
+    const cabeceras = { headers: { 'x-admin-key': ADMIN_API_KEY }, timeout: 3000 };
+    const uidPrueba = process.env.UID_PRUEBA || '';
     const [agentsResp, fixturesResp, chatResp, saldoFB, saldoEP] = await Promise.allSettled([
-      axios.get('https://betgroup-proxy-v2.onrender.com/api/agents-status', { timeout: 3000 }),
-      axios.get('https://betgroup-proxy-v2.onrender.com/api/fixtures', { timeout: 3000 }),
-      axios.post('https://betgroup-proxy-v2.onrender.com/api/chat', { mensaje: 'Test' }, { timeout: 3000 }),
-      db.ref('users/BG_mq7rch3t_h6sjfs1h/creditoReal').once('value'),
-      axios.get('https://betgroup-proxy-v2.onrender.com/api/saldo/BG_mq7rch3t_h6sjfs1h', { timeout: 3000 })
+      axios.get(base + '/api/agents-status', cabeceras),
+      axios.get(base + '/api/fixtures', { timeout: 3000 }),
+      axios.post(base + '/api/chat', { mensaje: 'Test' }, { timeout: 3000 }),
+      uidPrueba ? db.ref('users/' + uidPrueba + '/creditoReal').once('value') : Promise.reject(new Error('sin UID_PRUEBA')),
+      uidPrueba ? axios.get(base + '/api/saldo/' + uidPrueba, { timeout: 3000 }) : Promise.reject(new Error('sin UID_PRUEBA'))
     ]);
 
     if (agentsResp.status === 'fulfilled') estado.agentes = agentsResp.value.data?.agents || {};
@@ -964,7 +1001,7 @@ app.get('/api/verificacion-geminis', async (req, res) => {
 
 
 // ==================== LIQUIDACIÓN DE APUESTAS (TRANSACCIONAL) ====================
-app.post('/api/apuestas/liquidar', async (req, res) => {
+app.post('/api/apuestas/liquidar', requireAdmin, async (req, res) => {
   const { partidoId, resultadoGanador } = req.body;
   if (!partidoId || !resultadoGanador) {
     return res.status(400).json({ error: 'partidoId y resultadoGanador requeridos' });
@@ -1041,7 +1078,7 @@ app.post('/api/apuestas/liquidar', async (req, res) => {
 
 
 // ==================== REINICIO DEL SISTEMA (MULTI-NODO) ====================
-app.post('/api/admin/reiniciar', async (req, res) => {
+app.post('/api/admin/reiniciar', requireAdmin, async (req, res) => {
   try {
     const updates = {
       'apuestas': null,
@@ -1069,7 +1106,7 @@ app.post('/api/admin/reiniciar', async (req, res) => {
 
 
 // ==================== REFERIDOS FILTRADOS POR SUBADMIN ====================
-app.get('/api/usuarios/mis-referidos', async (req, res) => {
+app.get('/api/usuarios/mis-referidos', requireAdmin, async (req, res) => {
   const subadminUid = req.query.subadminUid;
   if (!subadminUid) return res.status(400).json({ error: 'subadminUid requerido' });
   try {
@@ -1088,7 +1125,7 @@ app.get('/api/usuarios/mis-referidos', async (req, res) => {
 
 
 // ==================== GENERAR CÓDIGO POR INICIAL DEL ROL ====================
-app.get('/api/admin/generar-codigo', async (req, res) => {
+app.get('/api/admin/generar-codigo', requireAdmin, async (req, res) => {
   const { rol = 'ceo' } = req.query;
   const rolesValidos = ['ceo', 'admin', 'moderador', 'soporte'];
   if (!rolesValidos.includes(rol)) return res.status(400).json({ error: 'Rol no válido' });
@@ -1111,7 +1148,7 @@ app.get('/api/admin/generar-codigo', async (req, res) => {
 
 
 // ==================== APLICAR CÓDIGO CEO ====================
-app.post('/api/admin/aplicar-codigo', async (req, res) => {
+app.post('/api/admin/aplicar-codigo', requireAdmin, async (req, res) => {
   const { codigo, uid } = req.body;
   if (!codigo || !uid) return res.status(400).json({ error: 'Código o UID faltante' });
 
@@ -1159,7 +1196,7 @@ const HF_MODELS = {
   rapido: 'Qwen/Qwen2.5-7B-Instruct'
 };
 
-app.post('/api/huggingface', async (req, res) => {
+app.post('/api/huggingface', limitarPeticiones(10, 60 * 1000), async (req, res) => {
   const { prompt, tarea, rol } = req.body;
   if (!prompt) return res.status(400).json({ error: 'Falta prompt' });
   const model = HF_MODELS[tarea] || HF_MODELS['rapido'];
@@ -1239,7 +1276,7 @@ El usuario actual tiene rol: ${rol || 'miembro'}.`;
 
 
 // ════ POST /api/enriquecer ════
-app.post('/api/enriquecer', async (req, res) => {
+app.post('/api/enriquecer', limitarPeticiones(20, 60 * 1000), async (req, res) => {
   try {
     const { eventos } = req.body;
     if (!Array.isArray(eventos) || eventos.length === 0) {
@@ -1458,7 +1495,7 @@ function programarReportes() {
   console.log('Sistema automatizado: reportes 8am/2pm Cuba, liquidacion 30min, monitoreo 24h.');
 }
 // ════ MONITOREO DEL SISTEMA ════
-app.get('/api/estado-sistema', async (req, res) => {
+app.get('/api/estado-sistema', requireAdmin, async (req, res) => {
   const estado = {
     timestamp: new Date().toISOString(),
     proxy: 'online',
@@ -1487,7 +1524,7 @@ app.get('/api/estado-sistema', async (req, res) => {
 });
 
 // ENDPOINT DE PRUEBA - disparar reporte manualmente
-app.post('/api/test-reporte', async (req, res) => {
+app.post('/api/test-reporte', requireAdmin, async (req, res) => {
   try {
     await enviarReporteTelegram();
     res.json({ success: true, message: 'Reporte enviado a Telegram.' });
@@ -1497,7 +1534,7 @@ app.post('/api/test-reporte', async (req, res) => {
 });
 
 // ENDPOINT DEBUG - ver que eventos tiene el reporte
-app.get('/api/debug-reporte', async (req, res) => {
+app.get('/api/debug-reporte', requireAdmin, async (req, res) => {
   try {
     const fixtures = getCache('fixtures');
     const cacheEvs = fixtures && fixtures.data ? fixtures.data.length : 0;
