@@ -214,9 +214,17 @@ Decisión de Yoel: seguir gratis (el sistema aún no da ganancia). Yoel usa 3-4 
 - Pruebas: `test/antifraude.prueba.js` (17), `test/app.e2e.js` (12 en navegador).
 - Casino: **aplazado por Yoel** (2 oct). Solo lo quiere por API, sin juegos propios. Investigado: no hay API gratis con dinero real (agregadores = contrato + licencia + excluyen Cuba). Única opción gratis: lobby demo con fichas ficticias (Slots Launch, plan Free; token en el servidor). Nada construido.
 
+## Etapa 11 — comisiones de la red (2 oct 2026, servidor desplegado; web pendiente de publicar)
+
+Decisiones de Yoel: rangos visibles **Agente** (rol interno `subadmin`) y **Supervisor** (rol interno `director`); "si la casa no gana no hay salario"; todo se junta y se paga **una vez por semana**.
+- `lib/comisiones.js`: ganancia semanal de la red de cada agente (apuestas reales liquidadas en la semana: apostado − pagado; promo ganada cuenta como gasto). Agente 5/10/15/20/25 % según activos (0-5/6-15/16-30/31-50/+50); supervisor 5 % de la ganancia de sus agentes; tope 30 % → casa ≥ 70 %. Semana negativa: 0 comisión y arrastre (`comisionesArrastre/<agente>`).
+- El CEO cierra cada semana terminada (en orden, una sola vez) → `comisionesSemana/<lunes>` + Telegram. Asigna agentes a supervisores (`users/<agente>/supervisorUid`, campo protegido).
+- El cierre diario del agente ya NO descuenta comisión (neto = ganancia del día); la comisión llega con el cierre semanal. Los % "editables" del panel CEO (que no se usaban) se sustituyeron por la tarjeta de comisiones semanales; `guardarComisiones` y `config/comisiones` siguen existiendo sin uso.
+- Pruebas: `test/comisiones.prueba.js` (17), `test/comisiones.e2e.js` (6), `test/referidos.e2e.js` actualizado.
+
 ## Cierre de la sesión del 2 oct 2026 — pendiente para la próxima
 
-1. **Publicar la web de la Etapa 10** (el servidor ya está en `etapa10`): `git -C ~/bg-frontend-privado fetch -q origin claude/upbeat-cerf-rpytdm && git -C ~/bg-frontend-privado checkout -q -B etapa3 origin/claude/upbeat-cerf-rpytdm && bash ~/bg-frontend-privado/publicar/publicar_web.sh` (copia también sw.js, manifest.json e iconos/).
+1. **Publicar la web de las Etapas 10 y 11** (el servidor estará en `etapa11`): `git -C ~/bg-frontend-privado fetch -q origin claude/upbeat-cerf-rpytdm && git -C ~/bg-frontend-privado checkout -q -B etapa3 origin/claude/upbeat-cerf-rpytdm && bash ~/bg-frontend-privado/publicar/publicar_web.sh` (copia también sw.js, manifest.json e iconos/).
 2. Tras publicar: instalar la app desde Chrome, aceptar avisos, revisar "Riesgo de fraude" y que los subadmins vean a todos sus referidos.
 3. Lunes: primer aviso del ranking semanal por Telegram → revisar antifraude antes de "Entregar premios".
 4. Vigilar créditos de The Odds API (`diagnostico_cuotas.sh sincuota`).

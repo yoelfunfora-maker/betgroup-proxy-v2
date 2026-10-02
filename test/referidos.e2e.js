@@ -113,8 +113,11 @@ http.createServer((req, res) => {
     await entrar('s@x.com');
     const recS = await apostadoHoy();
     ok(recS === '300.00', 'el panel del subadmin suma lo apostado por el miembro antiguo (100) y el nuevo (200) → ' + recS + ' (antes solo contaba 100)');
-    const comS = (await pagina.textContent('#subCom')).trim();
-    ok(Number(comS) > 0, 'y calcula su comisión sobre ese total → ' + comS);
+    // Desde la Etapa 11 la comisión es semanal: el cierre diario entrega todo y la tarjeta semanal cuenta a los dos.
+    const netoS = (await pagina.textContent('#subNeto')).trim();
+    ok(netoS === '300.00', 'el cierre diario entrega toda la ganancia (la comisión se paga por semana) → ' + netoS);
+    await pagina.waitForFunction(() => /Tu porcentaje/.test(document.getElementById('subComisionDatos').textContent), null, { timeout: 15000 });
+    ok(/2 de 2/.test(await pagina.textContent('#subComisionDatos')), 'y su comisión semanal cuenta a los dos miembros (2 de 2 activos)');
     await pagina.evaluate(() => cargarSolicitudesSubadmin());
     await pagina.waitForTimeout(1500);
 
