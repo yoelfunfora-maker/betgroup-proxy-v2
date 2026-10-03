@@ -85,7 +85,7 @@ const persona = (i, extra = {}) => ({
 
     // ---- Versión del servidor para el script de publicación ----
     const v = await (await fetchReal('http://127.0.0.1:3995/api/version')).json();
-    ok(v.version === 'etapa15', 'el servidor anuncia su versión (etapa15)');
+    ok(v.version === 'etapa16', 'el servidor anuncia su versión (etapa16)');
 
     // ---- Fotos de los luchadores de MMA ----
     let evs = [];
