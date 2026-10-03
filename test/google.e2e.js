@@ -136,11 +136,21 @@ async function registrar(pagina, i, codigo) {
     await pagina.waitForTimeout(2500);
     ok(await pagina.isHidden('#bgGoogleZona'), 'si Google no carga, no aparece un botón roto');
     await registrar(pagina, 2, 'TT-2');
-    ok(await pagina.isHidden('#bgTurnstile'), 'si Cloudflare no carga, no aparece una casilla rota');
+    await pagina.waitForSelector('#bgTurnstile.bg-turnstile-fallo', { timeout: 15000 });
+    ok(/No cargó la verificación/.test(await pagina.textContent('#bgTurnstile')) && /Registrarse con Google/.test(await pagina.textContent('#bgTurnstile')),
+      'casilla OBLIGATORIA que no carga: se explica qué hacer y se ofrece Google (no una casilla rota)');
+    await pagina.locator('#bgTurnstile').screenshot({ path: path.join(__dirname, 'captura-turnstile-no-carga.png') });
+    await pagina.click('#btnRegistro');
+    await pagina.waitForTimeout(800);
+    ok(!Object.values(get('users')).some(x => x.email === 'web2@nauta.cu') && /No soy un robot/.test(await pagina.textContent('#registerStatusMsg')),
+      'sin la casilla no se crea la cuenta, y se frena en el móvil (no gasta intentos del límite por conexión)');
+    // El CEO puede volver a dejar pasar a quien no la carga (config/turnstileObligatorio = false).
+    set('config/turnstileObligatorio', false);
+    await pagina.evaluate(() => { window.bgOpcionesAcceso.turnstileObligatorio = false; });
     await pagina.click('#btnRegistro');
     await pagina.waitForSelector('#app', { state: 'visible', timeout: 30000 });
     const web2 = Object.values(get('users')).find(x => x.email === 'web2@nauta.cu');
-    ok(web2, 'y la persona se registra igual con su código de invitación');
+    ok(web2, 'con la casilla desactivada por el CEO, se registra con su código de invitación');
 
     // ---- Vuelve la conexión: la app detecta Google y ofrece vincularlo ----
     await pagina.waitForTimeout(13000); // primer intento tras entrar: Google sigue caído

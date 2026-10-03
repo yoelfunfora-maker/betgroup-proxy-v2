@@ -118,11 +118,11 @@ const persona = (i, extra = {}) => ({ nombre: `Persona ${i}`, telefono: `5354${S
     [s] = await llamar('POST', '/api/auth/registro', persona(1, { turnstile: 'humano-ok' }));
     ok(s === 200 && turnstileVio.get('secret') === 'secreto-turnstile-prueba', 'Cloudflare confirma que es una persona: registro correcto');
     turnstileCaido = true;
-    [s] = await llamar('POST', '/api/auth/registro', persona(2));
-    ok(s === 200, 'si la casilla no carga (conexión lenta), puede registrarse igual con su código');
-    set('config/turnstileObligatorio', true);
-    [s, j] = await llamar('POST', '/api/auth/registro', persona(3));
-    ok(s === 400 && /No soy un robot/.test(j.error), 'si el CEO la hace obligatoria (config/turnstileObligatorio), sin casilla no hay registro');
+    [s, j] = await llamar('POST', '/api/auth/registro', persona(2));
+    ok(s === 400 && /No soy un robot/.test(j.error) && /Registrarse con Google/.test(j.error), 'la casilla es OBLIGATORIA: si no llega, no hay registro y se le ofrece Google → ' + (j && j.error));
+    set('config/turnstileObligatorio', false);
+    [s] = await llamar('POST', '/api/auth/registro', persona(3));
+    ok(s === 200, 'con config/turnstileObligatorio = false vuelve a dejar pasar a quien no la carga');
   } catch (e) {
     ok(false, 'error inesperado: ' + e.message);
   }

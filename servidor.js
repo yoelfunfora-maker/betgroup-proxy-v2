@@ -831,7 +831,7 @@ app.get('/api/ping', (req, res) => {
 
 // Versión del servidor: el script de publicación espera a que Render tenga esta antes de subir la web.
 app.get('/api/version', (req, res) => {
-  res.json({ version: 'etapa13' });
+  res.json({ version: 'etapa14' });
 });
 
 app.get('/api/health', (req, res) => {
@@ -1041,21 +1041,25 @@ const limiteRecuperar = limitador({ ventanaMs: 60 * 60 * 1000, maximo: 10, mensa
 // Apagados hasta que existan GOOGLE_CLIENT_ID / TURNSTILE_SITE_KEY + TURNSTILE_SECRET en Render.
 const verificadorGoogle = crearVerificadorGoogle({ clientId: config.googleClientId });
 // La web pregunta qué opciones mostrar (solo datos públicos).
-app.get('/api/auth/opciones', (req, res) => {
-  res.json({ google: config.googleClientId || null, turnstile: config.turnstile.sitio && config.turnstile.secreto ? config.turnstile.sitio : null });
+app.get('/api/auth/opciones', async (req, res) => {
+  const turnstile = config.turnstile.sitio && config.turnstile.secreto ? config.turnstile.sitio : null;
+  let obligatorio = true;
+  try { obligatorio = (await db.ref('config/turnstileObligatorio').once('value')).val() !== false; } catch (e) { /* por defecto obligatoria */ }
+  res.json({ google: config.googleClientId || null, turnstile, turnstileObligatorio: Boolean(turnstile) && obligatorio });
 });
 
-// Casilla "No soy un robot" en el registro. Si Cloudflare dice que NO, se rechaza. Si la casilla no
-// pudo cargar (conexión lenta en Cuba), se deja pasar (el código de invitación sigue siendo
-// obligatorio) salvo que el CEO ponga config/turnstileObligatorio = true; queda en la auditoría.
+// Casilla "No soy un robot" en el registro: OBLIGATORIA (decisión de Yoel, 3 oct 2026). Si Cloudflare
+// dice que NO, o la casilla no llegó (no cargó), se rechaza. Quien no pueda cargarla puede usar
+// "Registrarse con Google" (Google ya comprueba que es una persona). Para volver a dejar pasar
+// a quien no la carga: config/turnstileObligatorio = false (queda anotado en la auditoría).
 async function revisarTurnstile(req, res, next) {
   try {
     if (!config.turnstile.secreto || !config.turnstile.sitio) return next();
     const r = await comprobarTurnstile({ secreto: config.turnstile.secreto, token: req.body?.turnstile, ip: ipCliente(req) });
     if (r === false) return res.status(400).json({ error: 'No pudimos comprobar que eres una persona. Recarga la página e inténtalo de nuevo' });
     if (r === null) {
-      const obligatorio = (await db.ref('config/turnstileObligatorio').once('value')).val() === true;
-      if (obligatorio) return res.status(400).json({ error: 'Completa la verificación "No soy un robot" antes de crear la cuenta' });
+      const obligatorio = (await db.ref('config/turnstileObligatorio').once('value')).val() !== false;
+      if (obligatorio) return res.status(400).json({ error: 'Completa la verificación "No soy un robot" antes de crear la cuenta. Si no te carga, usa "Registrarse con Google"' });
       req.sinTurnstile = true;
     }
     return next();
