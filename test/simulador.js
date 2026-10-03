@@ -67,6 +67,7 @@ function ref(p = '') {
           filas = filas.filter(([, x]) => x && typeof x === 'object');
           if ('equalTo' in q) filas = filas.filter(([, x]) => x[q.child] === q.equalTo);
           if ('startAt' in q) filas = filas.filter(([, x]) => x[q.child] >= q.startAt);
+          if ('endAt' in q) filas = filas.filter(([, x]) => x[q.child] <= q.endAt);
           filas.sort((a, b) => (a[1][q.child] > b[1][q.child] ? 1 : -1));
         }
         if (q.limit) filas = q.limit.ultimo ? filas.slice(-q.limit.n) : filas.slice(0, q.limit.n);

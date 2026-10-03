@@ -14,6 +14,8 @@ const { crearVerificadorGoogle, comprobarTurnstile, esCorreoDeGoogle, ErrorAcces
 const { crearAutenticacion, NIVEL, normalizarClave } = require('./lib/autenticacion');
 const validar = require('./lib/validacion');
 const { crearMotorApuestas, ErrorApuesta, centavos } = require('./lib/apuestas');
+const { crearWebPush } = require('./lib/webpush');
+const { crearNotificaciones, avisoApuesta, avisoLiquidacion } = require('./lib/notificaciones');
 const { crearRanking, semanaDe, semanaPorId, semanaAnterior } = require('./lib/ranking');
 const imagenes = require('./lib/imagenes');
 const { crearApiFootball } = require('./lib/apiFootball');
@@ -87,17 +89,22 @@ const auditoria = crearAuditoria(db, config.auditoriaSecreto);
 const auth = crearAutenticacion({ db, config, auditoria });
 const { requerirSesion, requerirNivel } = auth;
 // Único sitio que coloca y liquida apuestas (ver lib/apuestas.js).
+// Avisos a cada persona: bandeja + notificación en el teléfono (ver lib/notificaciones.js y lib/webpush.js).
+const webpush = crearWebPush({ db, secreto: config.sesionSecreto });
+const notificaciones = crearNotificaciones({ db, webpush });
 const motor = crearMotorApuestas({
   db, auditoria,
   obtenerEventos: () => { const f = getCache('fixtures'); return f && Array.isArray(f.data) ? f.data : null; },
-  avisar: (texto) => notificarTelegram(texto)
+  avisar: (texto) => notificarTelegram(texto),
+  alLiquidar: (uid, betId, apuesta) => notificaciones.notificar(uid, avisoLiquidacion(apuesta), { urgencia: 'high' })
 });
 // El frontend lee y escribe la base de datos solo a través de /api/db (ver lib/politicas.js).
 const proxyDb = crearProxyDb({ db, auditoria });
 const operaciones = crearOperaciones({
   db, auditoria, auth, config,
   notificarTelegram: (t) => notificarTelegram(t),
-  escaparHtml: (t) => escaparHtml(t)
+  escaparHtml: (t) => escaparHtml(t),
+  avisar: (uid, aviso) => notificaciones.notificar(uid, aviso)
 });
 
 // Ranking semanal (ver lib/ranking.js).
@@ -1014,6 +1021,66 @@ app.get('/api/admin/diagnostico-cuotas', soloCEO, operacion(async (req) => {
     partidos: eventos.map(e => diagnosticoCuota(e, q === 'sincuota' ? 1 : 3))
   };
 }));
+// ==================== AVISOS: BANDEJA Y NOTIFICACIONES PUSH (lib/notificaciones.js) ====================
+const limiteBandeja = limitador({ ventanaMs: 60 * 1000, maximo: 60, clave: porUsuario });
+const limitePush = limitador({ ventanaMs: 60 * 60 * 1000, maximo: 30, clave: porUsuario });
+app.get('/api/notificaciones', requerirSesion, limiteBandeja, operacion((req) => notificaciones.listar(req.usuario.uid)));
+app.post('/api/notificaciones/leer', requerirSesion, limiteBandeja, operacion(async (req) => {
+  const todas = req.body?.todas === true;
+  const ids = Array.isArray(req.body?.ids) ? req.body.ids.filter(x => typeof x === 'string' && /^[A-Za-z0-9_-]{1,40}$/.test(x)).slice(0, 100) : [];
+  if (!todas && !ids.length) throw new ErrorOperacion(400, 'Indica qué avisos marcar');
+  return notificaciones.marcarLeidas(req.usuario.uid, { ids, todas });
+}));
+// Clave pública VAPID: el navegador la necesita para suscribirse (es pública por diseño).
+app.get('/api/push/clave', operacion(async () => ({ clave: await webpush.clavePublica() })));
+app.post('/api/push/suscribir', requerirSesion, limitePush, operacion(async (req) => {
+  const id = await notificaciones.suscribir(req.usuario.uid, req.body?.suscripcion, req.get('user-agent') || '');
+  if (!id) throw new ErrorOperacion(400, 'Suscripción no válida');
+  return { suscrito: true };
+}));
+app.post('/api/push/baja', requerirSesion, limitePush, operacion(async (req) => ({ baja: await notificaciones.baja(req.usuario.uid, req.body?.endpoint) })));
+// CEO: aviso a todos los inscritos (bandeja + teléfono) y publicar ya las ofertas del día.
+app.post('/api/admin/aviso-general', soloCEO, operacion(async (req) => {
+  const titulo = validar.texto(req.body?.titulo, 80);
+  const texto = validar.texto(req.body?.texto, 400);
+  if (!titulo || !texto) throw new ErrorOperacion(400, 'Escribe el título y el texto del aviso');
+  const r = await notificaciones.avisoGeneral({ tipo: 'general', titulo, texto, url: '#avisos' });
+  await auditoria.registrarSeguro({ accion: 'aviso_general', actor: req.usuario.uid, objetivo: r.id, requestId: req.id, detalles: { titulo } });
+  return r;
+}));
+app.post('/api/admin/publicar-ofertas', soloCEO, operacion(async (req) => {
+  const r = await publicarOfertasDelDia();
+  if (!r) throw new ErrorOperacion(409, 'Ahora mismo no hay partidos próximos con cuota para publicar');
+  await auditoria.registrarSeguro({ accion: 'ofertas_publicadas', actor: req.usuario.uid, objetivo: r.id, requestId: req.id });
+  return r;
+}));
+
+// Ofertas del día (8 am y 2 pm de Cuba): los próximos partidos con cuota, a TODOS los inscritos.
+// Lista fija y comprobable (no la inventa una IA): los 4 partidos con cuota que empiezan antes,
+// dentro de las próximas 18 h, uno por liga para que haya variedad.
+function ofertasDelDia(eventos, ahora = Date.now()) {
+  const proximos = (eventos || []).filter(e => {
+    const t = Date.parse(e.horaInicio || '');
+    return e.estado === 'scheduled' && Number(e.cuota_local) > 1 && Number(e.cuota_visitante) > 1 && t > ahora + 15 * 60000 && t < ahora + 18 * 3600000;
+  }).sort((a, b) => Date.parse(a.horaInicio) - Date.parse(b.horaInicio));
+  const ligas = new Set();
+  const elegidos = [];
+  for (const e of proximos) {
+    if (ligas.has(e.liga)) continue;
+    ligas.add(e.liga); elegidos.push(e);
+    if (elegidos.length === 4) break;
+  }
+  return elegidos;
+}
+async function publicarOfertasDelDia() {
+  const elegidos = ofertasDelDia((getCache('fixtures') || cache.fixtures?.data || {}).data);
+  if (!elegidos.length) return null;
+  const hora = (iso) => new Date(iso).toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit', timeZone: 'America/Havana' });
+  const texto = elegidos.map(e => `${e.local} vs ${e.visitante} (${hora(e.horaInicio)}): 1 ×${Number(e.cuota_local).toFixed(2)}${Number(e.cuota_empate) > 1 ? ` · X ×${Number(e.cuota_empate).toFixed(2)}` : ''} · 2 ×${Number(e.cuota_visitante).toFixed(2)}`).join(' | ');
+  const manana = new Date().getUTCHours() < 16;
+  return notificaciones.avisoGeneral({ tipo: 'ofertas', titulo: manana ? 'Cuotas de la mañana' : 'Cuotas de la tarde', texto, url: '#home' });
+}
+
 // ---------- Ranking semanal y apodo ----------
 const limiteApodo = limitador({ ventanaMs: 60 * 60 * 1000, maximo: 20, clave: porUsuario });
 app.post('/api/perfil/apodo', requerirSesion, limiteApodo, operacion((req) => operaciones.fijarApodo(req)));
@@ -1357,6 +1424,9 @@ app.post('/api/apostar', requerirSesion, limiteApuestas, async (req, res) => {
       cuotaCliente: cuotaCliente === undefined ? undefined : Number(cuotaCliente), tipoSaldo, requestId: req.id
     });
     res.json({ success: true, ...r });
+    // Aviso "Apuesta registrada" (después de responder: no retrasa la apuesta).
+    notificaciones.notificar(req.usuario.uid, avisoApuesta({ ...r, tipo, monto }))
+      .catch(e => console.error('Aviso de apuesta no enviado:', e.message));
   } catch(err) {
     if (err instanceof ErrorApuesta) return res.status(err.estado).json({ error: err.message, ...err.extra });
     responderError(res, req, err, '/api/apostar');
@@ -2201,6 +2271,7 @@ function programarReportes() {
   function programar8am() {
     setTimeout(function() {
       enviarReporteTelegram();
+      publicarOfertasDelDia().catch(function(e) { console.error('Ofertas del día:', e.message); });
       programar8am();
     }, proximaHoraUTC(12, 0));
   }
@@ -2208,6 +2279,7 @@ function programarReportes() {
   function programar2pm() {
     setTimeout(function() {
       enviarReporteTelegram();
+      publicarOfertasDelDia().catch(function(e) { console.error('Ofertas del día:', e.message); });
       programar2pm();
     }, proximaHoraUTC(18, 0));
   }
