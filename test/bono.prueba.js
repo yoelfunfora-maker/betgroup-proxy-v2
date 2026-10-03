@@ -56,8 +56,15 @@ const registro = (i) => llamar('POST', '/api/auth/registro', { nombre: `Nuevo ${
 
     // ---- Cuentas antiguas: sin cambios ----
     const tV = await entrar('viejo@x.com');
-    [s] = await retiro(tV, 'BG_viejo', 'R4', 100);
-    ok(s === 200, 'una cuenta antigua (sin bono) retira como siempre');
+    [s, j] = await retiro(tV, 'BG_viejo', 'R4', 499);
+    ok(s === 400 && j.error === 'El retiro mínimo es de 500 CUP', 'retiro mínimo: 499 no se acepta → ' + j.error);
+    [s] = await retiro(tV, 'BG_viejo', 'R5', 500);
+    ok(s === 200, 'retiro mínimo: 500 sí (una cuenta antigua, sin bono, retira como siempre)');
+    set('config/retiroMinimoCUP', 1000);
+    set('users/BG_viejo/creditoReal', 900);
+    [s, j] = await retiro(tV, 'BG_viejo', 'R6', 800);
+    ok(s === 400 && /1000 CUP/.test(j.error), 'el CEO puede cambiar el mínimo (config/retiroMinimoCUP = 1000)');
+    set('config/retiroMinimoCUP', null);
 
     // ---- El CEO puede cambiar o apagar el bono ----
     set('config/bonoInscripcion', 0);
