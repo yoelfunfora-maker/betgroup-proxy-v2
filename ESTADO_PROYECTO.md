@@ -265,6 +265,15 @@ Revisión previa: el "Entrar con Google" antiguo nunca funcionó en la versión 
 - **Sin emojis**: Font Awesome 6.4 servido desde `fuentes/fa` (sin CDN); textos fijos convertidos; un traductor (MutationObserver) cambia por icono cualquier emoji que pinte el código; en alert/confirm/prompt, opciones de listas y notificaciones del móvil se quitan. Telegram conserva sus emojis (mensajes internos del CEO).
 - Pruebas: `test/redes.e2e.js` (cada panel ve solo su gente, enlace de invitación, 15 pantallas sin emojis). Versión del servidor: `etapa15`.
 
+## Etapa 16 (3 oct 2026) — Mi perfil
+- Botón **Mi perfil** en la cabecera (panel `perfil`).
+- **Equipos favoritos** (máx. 5): `POST /api/perfil/favoritos` (validado; `equiposFavoritos` es campo protegido). Sugerencias con los equipos de la portada. Coincidencia flexible (Inter = Internazionale, sin tildes) igual en web y servidor (`lib/calendario.js`).
+- **Próximos partidos** de sus equipos con botón "Añadir" a Google Calendar.
+- **Calendario sincronizable**: `GET /api/calendario/:uid/:token.ics` (token HMAC por persona; iCalendar RFC 5545 con avisos 1 h y 15 min antes; se refresca cada 6 h). Botones Google Calendar (cid=webcal), iPhone (webcal://) y Copiar enlace. Los avisos del calendario suenan aunque la app esté cerrada.
+- **Avisos en la app**: 1 h antes de cada partido de sus equipos y resumen "Hoy juegan" (una vez al día).
+- **Estadísticas de por vida** (`calcularEstadisticas`, función pura): ganancia neta y ROI en dinero real, acierto, apostado/cobrado, bono aparte, apuesta y cuota media, mayor premio, cuota más alta acertada, rachas, gráfica mensual (SVG) y desglose por deporte y tipo de apuesta.
+- Pruebas: `test/calendario.prueba.js`, `test/perfil.e2e.js`. Versión del servidor: `etapa16`.
+
 ## Cierre de la sesión del 2 oct 2026 — pendiente para la próxima
 
 1. **Publicar la web de las Etapas 10, 11 y 12** (el servidor estará en `etapa12`): `git -C ~/bg-frontend-privado fetch -q origin claude/upbeat-cerf-rpytdm && git -C ~/bg-frontend-privado checkout -q -B etapa3 origin/claude/upbeat-cerf-rpytdm && bash ~/bg-frontend-privado/publicar/publicar_web.sh` (copia también sw.js, manifest.json e iconos/).
