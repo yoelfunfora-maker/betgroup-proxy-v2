@@ -101,17 +101,14 @@ http.createServer((req, res) => {
     const usos = get('dispositivosUso') || {};
     ok(Object.values(usos).some(g => g && g.BG_m1) && !JSON.stringify(usos).includes(await pagina.evaluate(() => localStorage.getItem('bg_disp'))),
       'antifraude: el móvil envía su identificador al entrar y el servidor lo guarda cifrado');
-    // Primero sale el tutorial; la tarjeta de avisos espera a que se cierre.
-    await pagina.waitForSelector('#bgTut', { timeout: 8000 });
-    ok(!(await pagina.$('#bgInvitarAvisos')), 'mientras está el tutorial no se le pide nada más');
-    await pagina.click('#bgTut .bg-tut-saltar');
-    await pagina.waitForSelector('#bgInvitarAvisos', { timeout: 15000 });
-    await pagina.waitForTimeout(3500); // que se vaya el "Bienvenido" para la captura
-    ok(true, 'tras entrar aparece "¿Te avisamos?" (explica para qué antes de pedir permiso)');
-    await pagina.locator('#bgInvitarAvisos').screenshot({ path: path.join(__dirname, 'captura-avisos.png') });
+    // Al pulsar "Iniciar Sesión" (un toque de la persona) la app ya pide el permiso de avisos.
     await contexto.grantPermissions(['notifications'], { origin: `http://127.0.0.1:${PUERTO_WEB}` });
-    await pagina.click('#bgAvisosSi');
-    ok(!(await pagina.$('#bgInvitarAvisos')), 'al pulsar "Activar" la tarjeta se cierra');
+    await pagina.waitForFunction(() => Notification.permission === 'granted', null, { timeout: 10000 });
+    ok(true, 'los avisos se activan al tocar "Iniciar Sesión": el móvil pide permiso en ese momento, sin pasos extra');
+    await pagina.waitForSelector('#bgTut', { timeout: 8000 });
+    await pagina.click('#bgTut .bg-tut-saltar');
+    await pagina.waitForTimeout(6000);
+    ok(!(await pagina.$('#bgInvitarAvisos')), 'y ya no hace falta la tarjeta "¿Te avisamos?" (solo sale si aún no se pidió)');
 
     // ---- Una apuesta se resuelve → aviso ----
     set('apuestas/BG_m1/b1', { ...get('apuestas/BG_m1/b1'), estado: 'ganada', pago: 200 });
