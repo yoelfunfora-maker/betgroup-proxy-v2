@@ -68,11 +68,11 @@ const entrar = async (uid) => (await llamar('POST', '/api/auth/login', { identif
     const A = j.agentes.find(a => a.uid === 'BG_A'), B = j.agentes.find(a => a.uid === 'BG_B');
     ok(s === 200 && A.jugadores === 8 && A.activos === 7, 'el agente A tiene 8 jugadores, pero solo 7 activos: el que solo jugó el bono no cuenta');
     ok(A.ganancia === 5850, 'ganancia de la red de A: 12.000 apostado − 6.000 pagado − 150 de promo (la pendiente no cuenta) → ' + A.ganancia);
-    ok(A.pct === 0.10 && A.comisionAgente === 585, '7 activos → 10 % para el agente: 585 CR');
+    ok(A.pct === 0.05 && A.comisionAgente === 292.5, 'agente: 5 % FIJO de la ganancia (aunque tenga 7 activos): 292,5 CR');
     ok(A.depositado === 3000 && A.retirado === 500 && A.inyeccionNeta === 2500 && A.comisionInyeccion === 75,
       'inyección neta de A: 3.000 depositado − 500 retirado = 2.500 → 3 % = 75 CR (no cuentan lo rechazado, lo pendiente ni el jugador inactivo)');
-    ok(A.totalAgente === 660, 'el agente A cobra en total 585 (ganancia) + 75 (inyección) = 660 CR');
-    ok(A.comisionSupervisor === 292.5 && A.casa === 4897.5, 'supervisora 5 %: 292,5 CR · casa: 4.897,5 CR');
+    ok(A.totalAgente === 367.5, 'el agente A cobra en total 292,5 (ganancia) + 75 (3 % fijo de inyección) = 367,5 CR');
+    ok(A.comisionSupervisor === 585 && A.casa === 4897.5, 'supervisora 10 % de la ganancia: 585 CR · casa: 5.850 − 292,5 − 585 − 75 = 4.897,5 CR');
     ok(B.ganancia === -1000 && B.comisionAgente === 0 && B.arrastreSiguiente === -1000, 'red de B en pérdidas (−1.000): sin comisión y la pérdida pasa a la semana siguiente');
     ok(B.inyeccionNeta === 4000 && B.comisionInyeccion === 0, 'B inyectó 4.000 pero la casa perdió con su red: no cobra el 3 % (solo si la casa gana)');
     const S = j.agentes.find(a => a.uid === 'BG_S');
@@ -85,8 +85,8 @@ const entrar = async (uid) => (await llamar('POST', '/api/auth/login', { identif
     [s, j] = await llamar('GET', `/api/comisiones?semana=${pasada.id}`, null, t.BG_A);
     ok(s === 200 && j.agentes.length === 1 && j.agentes[0].uid === 'BG_A' && !j.totales, 'el agente solo ve lo suyo');
     [s, j] = await llamar('GET', `/api/comisiones?semana=${pasada.id}`, null, t.BG_S);
-    ok(s === 200 && j.agentes.map(a => a.uid).sort().join() === 'BG_A,BG_S' && j.supervisores[0].comision === 292.5,
-      'la supervisora ve a sus agentes, su fila propia como agente y su 5 % de equipo (292,5)');
+    ok(s === 200 && j.agentes.map(a => a.uid).sort().join() === 'BG_A,BG_S' && j.supervisores[0].comision === 585,
+      'la supervisora ve a sus agentes, su fila propia como agente y su 10 % de equipo (585)');
     [s] = await llamar('GET', '/api/comisiones', null, t.BG_a1);
     ok(s === 403, 'un jugador no ve comisiones');
 

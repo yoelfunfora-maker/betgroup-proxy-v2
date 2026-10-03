@@ -89,8 +89,8 @@ http.createServer((req, res) => {
     await pagina.evaluate(() => goPanel('ceo'));
     await pagina.waitForSelector('#ceoComTabla >> text=Cerrar semana', { timeout: 20000 });
     const tabla = await pagina.textContent('#ceoComTabla');
-    ok(/Andres/.test(tabla) && /10 %/.test(tabla) && /500 CR/.test(tabla) && /250 CR/.test(tabla) && /4\.?250 CR/.test(tabla),
-      'el CEO ve: red de Andrés gana 5.000 → agente 10 % = 500, supervisora 5 % = 250, casa 4.250');
+    ok(/Andres/.test(tabla) && /5 %/.test(tabla) && !/10 %/.test(tabla.replace(/supervis[^\n]*/gi, '')) && /250 CR/.test(tabla) && /500 CR/.test(tabla) && /4\.?250 CR/.test(tabla),
+      'el CEO ve: red de Andrés gana 5.000 → agente 5 % fijo = 250, supervisora 10 % = 500, casa 4.250');
     await pagina.locator('#ceoComisionesCard').screenshot({ path: path.join(__dirname, 'captura-comisiones-ceo.png') });
     await pagina.click('#ceoComTabla >> text=Cerrar semana');
     await pagina.waitForSelector('#ceoComTabla >> text=Semana cerrada', { timeout: 15000 });
@@ -106,15 +106,15 @@ http.createServer((req, res) => {
     ok(/300 CR/.test(mia) && /5 %/.test(mia) && /15 CR/.test(mia), 'el agente ve su semana: red gana 300, 5 %, comisión estimada 15 CR');
     await pagina.locator('#subComisionSemana').screenshot({ path: path.join(__dirname, 'captura-comision-agente.png') });
 
-    // ---- Supervisora: sus agentes y su 5 % ----
+    // ---- Supervisora: sus agentes y su 10 % ----
     await entrar('sup@x.com');
     await pagina.evaluate(() => goPanel('director'));
     await pagina.waitForSelector('#supComisionCard >> text=Andres', { timeout: 15000 });
     await pagina.waitForFunction(() => /Tus jugadores propios/.test(document.getElementById('supComisionDatos').textContent), null, { timeout: 15000 });
     const sup = await pagina.textContent('#supComisionDatos');
-    ok(/Por tu equipo \(5 %\)15 CR/.test(sup.replace(/\s+/g, ' ').replace(/ CR/g, ' CR').replace(/\) /g, ')')) || (/15 CR/.test(sup) && /50 CR/.test(sup)),
-      'la supervisora ve su 5 % de equipo (15) y lo que cobra como agente por su cliente propio (50)');
-    ok(/65 CR/.test(sup), 'su total estimado suma las dos cosas: 65 CR');
+    ok(/Por tu equipo \(10 %\)/.test(sup) && /30 CR/.test(sup) && /50 CR/.test(sup),
+      'la supervisora ve su 10 % de equipo (10 % de 300 = 30) y lo que cobra como agente por su cliente propio (5 % de 1.000 = 50)');
+    ok(/80 CR/.test(sup), 'su total estimado suma las dos cosas: 80 CR');
     await pagina.locator('#supComisionCard').screenshot({ path: path.join(__dirname, 'captura-comision-supervisor.png') });
   } catch (e) {
     ok(false, 'excepción: ' + e.message.split('\n')[0]);
