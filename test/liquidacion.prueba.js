@@ -105,7 +105,19 @@ setTimeout(async () => {
     [s, j] = await llamar('POST', '/api/apuestas/liquidar', { partidoId: '999', marcador: '3-1' }, tCeo);
     ok(get('apuestas/BG_m1/manual1/estado') === 'ganada', 'manual con marcador 3-1: Over 2.5 ganada');
 
+    // Apuestas que nunca tienen resultado: a los 7 días se anulan y se devuelve lo apostado.
+    const saldoAntes = get('users/BG_m1/creditoReal');
+    set('apuestas/BG_m1/vieja', { estado: 'pendiente', eventoId: 'NOEXISTE1', eventoNombre: 'Fantasma vs Nadie', tipo: 'Local', monto: 150, cuota: 2, saldoCampo: 'creditoReal', fecha: Date.now() - 12 * 86400000 });
+    set('apuestas/BG_m1/reciente', { estado: 'pendiente', eventoId: 'NOEXISTE2', eventoNombre: 'Hoy vs Manana', tipo: 'Local', monto: 50, cuota: 2, saldoCampo: 'creditoReal', fecha: Date.now() - 2 * 86400000 });
+    [s, j] = await llamar('POST', '/api/admin/liquidar-ahora', {}, tCeo);
+    ok(get('apuestas/BG_m1/vieja/estado') === 'anulada' && get('apuestas/BG_m1/vieja/liquidadaPor') === 'auto-sin-resultado' && get('users/BG_m1/creditoReal') === saldoAntes + 150,
+      'apuesta pendiente de hace 12 días sin resultado: se anula y se devuelven los 150 CR');
+    ok(get('apuestas/BG_m1/reciente/estado') === 'pendiente', 'una pendiente de hace 2 días sigue esperando su resultado');
+    set('apuestas/BG_m1/reciente', null);
+    set('users/BG_m1/creditoReal', 0);
+
     // Eliminar usuario.
+    set('users/BG_m1/creditoReal', 10);
     [s, j] = await llamar('POST', '/api/admin/eliminar-usuario', { uid: 'BG_m1' }, tCeo);
     ok(s === 409, 'no se elimina a quien tiene saldo → ' + s);
     set('users/BG_m1/creditoReal', 0);

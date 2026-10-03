@@ -13,7 +13,7 @@ const { crearAuditoria } = require('./lib/auditoria');
 const { crearVerificadorGoogle, comprobarTurnstile, esCorreoDeGoogle, ErrorAcceso } = require('./lib/accesoExterno');
 const { crearAutenticacion, NIVEL, normalizarClave } = require('./lib/autenticacion');
 const validar = require('./lib/validacion');
-const { crearMotorApuestas, ErrorApuesta } = require('./lib/apuestas');
+const { crearMotorApuestas, ErrorApuesta, centavos } = require('./lib/apuestas');
 const { crearRanking, semanaDe, semanaPorId, semanaAnterior } = require('./lib/ranking');
 const imagenes = require('./lib/imagenes');
 const { crearApiFootball } = require('./lib/apiFootball');
@@ -1965,6 +1965,7 @@ async function liquidarApuestasAutomatico() {
     const consultas = new Map(); // ruta -> Set(fechas)
     const idsPendientes = new Set();
     const nombresPendientes = new Set();
+    const fechasSinRuta = new Set(); // apuestas antiguas sin competición guardada: se buscan en su fecha
     let pendientes = 0;
     for (const delUsuario of Object.values(todas)) {
       for (const ap of Object.values(delUsuario || {})) {
@@ -1972,11 +1973,13 @@ async function liquidarApuestasAutomatico() {
         pendientes++;
         if (ap.eventoId) idsPendientes.add(String(ap.eventoId));
         if (ap.eventoNombre) nombresPendientes.add(String(ap.eventoNombre).toLowerCase().trim());
+        const inicio = Date.parse(ap.horaInicio) || Number(ap.fecha) || Date.now();
         if (ap.ruta) {
-          const inicio = Date.parse(ap.horaInicio) || Number(ap.fecha) || Date.now();
           if (!consultas.has(ap.ruta)) consultas.set(ap.ruta, new Set());
           // ESPN agrupa por día de EE. UU.: se mira el día UTC y el anterior.
           consultas.get(ap.ruta).add(fechaEspn(inicio)).add(fechaEspn(inicio - 86400000));
+        } else if (Date.now() - inicio < 7 * 86400000) {
+          fechasSinRuta.add(fechaEspn(inicio)); fechasSinRuta.add(fechaEspn(inicio + 86400000));
         }
       }
     }
@@ -1986,6 +1989,7 @@ async function liquidarApuestasAutomatico() {
       const ruta = d.path.replace(/\/scoreboard$/, '');
       if (!consultas.has(ruta)) consultas.set(ruta, new Set());
       consultas.get(ruta).add('');
+      for (const f of fechasSinRuta) consultas.get(ruta).add(f);
     }
 
     let liquidadas = 0;
@@ -2012,6 +2016,7 @@ async function liquidarApuestasAutomatico() {
       }
     }
     if (liquidadas > 0) console.log('Auto-liquidadas: ' + liquidadas);
+    liquidadas += await anularPendientesSinResultado(todas);
     return liquidadas;
   } catch (e) {
     console.error('Error auto-liq:', e.message);
@@ -2019,6 +2024,32 @@ async function liquidarApuestasAutomatico() {
   } finally {
     liquidandoAhora = false;
   }
+}
+
+// Regla de la casa (decisión de Yoel, 3 oct 2026): si el resultado de un partido no aparece en
+// N días desde su inicio (config/diasAnularPendientes, 7 por defecto), la apuesta se ANULA y se
+// devuelve lo apostado. Así ninguna apuesta queda "pendiente" para siempre ni se retiene dinero.
+async function anularPendientesSinResultado(todas) {
+  const conf = Number((await db.ref('config/diasAnularPendientes').once('value')).val());
+  const dias = Number.isFinite(conf) && conf >= 2 ? conf : 7;
+  const limite = Date.now() - dias * 86400000;
+  let n = 0, devuelto = 0;
+  for (const [uid, delUsuario] of Object.entries(todas || {})) {
+    for (const [betId, ap] of Object.entries(delUsuario || {})) {
+      if (!ap || ap.estado !== 'pendiente') continue;
+      const inicio = Date.parse(ap.horaInicio) || Number(ap.fecha) || 0;
+      if (!inicio || inicio > limite) continue;
+      try {
+        const r = await motor.liquidarApuesta({ uid, betId, resolucion: { anular: true }, origen: 'auto-sin-resultado' });
+        if (r) { n++; devuelto += Number(r.pago) || 0; }
+      } catch (e) { console.error('Anular sin resultado', uid, betId, e.message); }
+    }
+  }
+  if (n) {
+    console.log(`Anuladas por falta de resultado (${dias} días): ${n}`);
+    await notificarTelegram(`<b>Apuestas anuladas sin resultado</b>\n${n} apuesta(s) llevaban más de ${dias} días sin resultado oficial: se anularon y se devolvieron ${centavos(devuelto)} CR.`);
+  }
+  return n;
 }
 
 async function enviarMonitoreo24h() {
