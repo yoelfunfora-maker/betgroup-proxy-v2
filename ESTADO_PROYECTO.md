@@ -308,3 +308,12 @@ Revisión previa: el "Entrar con Google" antiguo nunca funcionó en la versión 
 **Avisos:** bandeja personal (`notificaciones/{uid}`), generales (`avisosGenerales`), push estándar RFC 8291/8292 (`lib/webpush.js`, clave VAPID cifrada AES-256-GCM en `secretos/vapid`). Falta la campana en la web.
 
 **Cuotas:** NBA en pretemporada (`basketball_nba_preseason`); registro automático de partidos sin cuota con el motivo y del margen real (fútbol ~7,4 %, NBA ~4,8 %).
+
+**Regla de Yoel (3 oct 2026): al terminar CUALQUIER cambio se verifica el login.**
+1. En local: `test/resiliencia.e2e.js`, `test/registro.e2e.js` y `test/google.e2e.js` (entrar con correo, con Google, con el servidor reiniciándose o caído).
+2. En producción: registros de Render sin errores ni bloqueos de Firebase (`/api/health` → `firebase.latenciaMs`).
+3. `publicar_web.sh` paso 5: base de datos, botón de Google, entrada de punta a punta (cuenta inexistente → 401 en ≤ 15 s) y web nueva.
+
+**Campana de avisos (web):** contador en la cabecera, bandeja (leer uno / todos, ir a su pantalla), suscripción Web Push al entrar o al dar permiso, baja al cerrar sesión. `sw.js` v4 muestra los avisos con la app cerrada. Pruebas: `test/campana.e2e.js`, `test/historial.e2e.js`.
+**Publicación:** solo se publican partidos con cuota real (`config/mostrarPartidosSinCuota` para mostrar todos). Amistosos y CONCACAF por API-Football (falta que Yoel guarde la clave).
+**Comisiones:** el 3 % de inyección se queda como está (personal, sin tope) — decisión de Yoel.
