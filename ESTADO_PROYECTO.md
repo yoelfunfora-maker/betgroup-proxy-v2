@@ -238,7 +238,7 @@ Decisiones de Yoel: rangos visibles **Agente** (rol interno `subadmin`) y **Supe
 - Un **supervisor con jugadores propios sigue cobrando por ellos como agente** (% por ganancia + 3 % de inyección) además de su 5 % de equipo (decisión de Yoel). En la tabla del CEO aparece como «(supervisor)».
 - `lib/comisiones.js` (`inyeccionJugador`, `PCT_INYECCION`); campos `depositado`, `retirado`, `inyeccionNeta`, `comisionInyeccion`, `totalAgente`. Paneles del agente y del CEO y desglose de Telegram actualizados. Prueba en `test/comisiones.prueba.js`.
 
-## Entrar con Google + Cloudflare Turnstile (2 oct 2026) — PREPARADO, SIN DESPLEGAR
+## Entrar con Google + Cloudflare Turnstile (2-3 oct 2026) — DESPLEGADO (servidor etapa13, 3 oct 2026)
 
 Revisión previa: el "Entrar con Google" antiguo nunca funcionó en la versión en vivo (cargaba `google-auth.js`, que no existe; ningún botón llamaba a `doGoogleSignIn`) y era inseguro (creaba la cuenta escribiendo directo en la BD). Nunca hubo Turnstile en el código; cualquier desafío de Cloudflare estaría en su panel.
 - `lib/accesoExterno.js`: verificación del ID token de Google con node:crypto (RS256 con las claves oficiales de Google, en caché; iss, aud, exp, email_verified) y comprobación de Turnstile.
@@ -247,7 +247,7 @@ Revisión previa: el "Entrar con Google" antiguo nunca funcionó en la versión 
 - `GET /api/auth/opciones` dice a la web qué mostrar. Todo APAGADO hasta definir en Render: `GOOGLE_CLIENT_ID`, `TURNSTILE_SITE_KEY`, `TURNSTILE_SECRET`.
 - **Vincular Google es OBLIGATORIO** (decisión de Yoel): quien entró sin Google puede usar la app mientras Google no responda; la web vigila la conexión (evento online + reintento cada 3 min, máx. 10) y en cuanto Google carga muestra una pantalla completa sin "Ahora no" (solo vincular o cerrar sesión). `POST /api/auth/google/vincular` (con sesión; reserva atómica de `googleCuentas/<sub>`; no permite tomar el Google de otro ni cambiarlo). Google exige un toque de confirmación: no puede hacerse en silencio. La obligación es de la web (el servidor no puede saber si Google carga en ese móvil).
 - Pruebas: `test/google.prueba.js` (30), `test/google.e2e.js` (17, incluye Google/Cloudflare bloqueados y la vinculación obligatoria al volver la conexión).
-- Pendiente: Yoel crea las claves; luego desplegar el servidor (push a main). Las funciones antiguas `doGoogleSignIn`/`showGoogleRegForm`/`completarGoogleReg` siguen en index.html sin uso (no se borran sin autorización).
+- Claves creadas por Yoel y puestas en Render (GOOGLE_CLIENT_ID del proyecto betgroup-cuba-2024; Turnstile con los hostnames web.app y firebaseapp.com). Servidor desplegado; falta publicar la web y probar en el móvil. Las funciones antiguas `doGoogleSignIn`/`showGoogleRegForm`/`completarGoogleReg` siguen en index.html sin uso (no se borran sin autorización).
 
 ## Cierre de la sesión del 2 oct 2026 — pendiente para la próxima
 
