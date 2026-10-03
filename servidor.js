@@ -19,6 +19,7 @@ const imagenes = require('./lib/imagenes');
 const { crearApiFootball } = require('./lib/apiFootball');
 const { crearAntifraude } = require('./lib/antifraude');
 const { crearComisiones, miembrosDe } = require('./lib/comisiones');
+const calendario = require('./lib/calendario');
 const { fusionarCuotasBot } = require('./lib/mercadosBot');
 const { leerMarcador } = require('./lib/mercados');
 const { crearProxyDb } = require('./lib/proxyDb');
@@ -915,6 +916,41 @@ app.get('/api/admin/diagnostico-cuotas', soloCEO, operacion(async (req) => {
 // ---------- Ranking semanal y apodo ----------
 const limiteApodo = limitador({ ventanaMs: 60 * 60 * 1000, maximo: 20, clave: porUsuario });
 app.post('/api/perfil/apodo', requerirSesion, limiteApodo, operacion((req) => operaciones.fijarApodo(req)));
+
+// ==================== EQUIPOS FAVORITOS Y CALENDARIO (lib/calendario.js) ====================
+function urlsCalendario(req, uid) {
+  const host = req.get('host') || 'betgroup-proxy-v2-8vqj.onrender.com';
+  const esLocal = /^(127\.0\.0\.1|localhost)(:\d+)?$/.test(host);
+  const https = `${esLocal ? 'http' : 'https'}://${host}/api/calendario/${uid}/${calendario.tokenCalendario(uid, config.sesionSecreto)}.ics`;
+  return { https, webcal: https.replace(/^https?:/, 'webcal:'), google: 'https://calendar.google.com/calendar/r?cid=' + encodeURIComponent(https.replace(/^https?:/, 'webcal:')) };
+}
+const limiteFavoritos = limitador({ ventanaMs: 60 * 60 * 1000, maximo: 60, clave: porUsuario });
+app.post('/api/perfil/favoritos', requerirSesion, limiteFavoritos, operacion(async (req) => {
+  let equipos;
+  try { equipos = calendario.limpiarEquipos(req.body?.equipos); } catch (e) { throw new ErrorOperacion(400, e.message); }
+  await db.ref(`users/${req.usuario.uid}/equiposFavoritos`).set(equipos.length ? equipos : null);
+  return { equipos, calendario: urlsCalendario(req, req.usuario.uid) };
+}));
+app.get('/api/perfil/calendario', requerirSesion, operacion(async (req) => ({ calendario: urlsCalendario(req, req.usuario.uid) })));
+
+// El calendario del teléfono lo vuelve a pedir cada pocas horas (sin sesión: el token del enlace lo protege).
+const limiteCalendario = limitador({ ventanaMs: 60 * 60 * 1000, maximo: 120 });
+app.get('/api/calendario/:uid/:archivo', limiteCalendario, async (req, res) => {
+  try {
+    const uid = String(req.params.uid || '');
+    const token = String(req.params.archivo || '').replace(/\.ics$/, '');
+    if (!validar.esUid(uid) || !calendario.tokenValido(uid, token, config.sesionSecreto)) return res.status(404).type('text/plain').send('Calendario no encontrado');
+    const u = (await db.ref(`users/${uid}`).once('value')).val();
+    if (!u || u.activo === false) return res.status(404).type('text/plain').send('Calendario no encontrado');
+    let fx = getCache('fixtures');
+    if (!fx) { await Promise.race([precalentarCache(), new Promise(r => setTimeout(r, 15000))]); fx = getCache('fixtures'); }
+    const partidos = calendario.partidosDe((fx && fx.data) || [], u.equiposFavoritos || []);
+    res.set('Cache-Control', 'private, max-age=1800');
+    res.type('text/calendar; charset=utf-8').send(calendario.generarIcs(partidos, { nombre: 'BetGroup · ' + (u.apodo || 'Mis equipos') }));
+  } catch (err) {
+    responderError(res, req, err, '/api/calendario');
+  }
+});
 // Cualquiera con sesión ve el top 10 (solo apodos, nunca nombres) y su propia situación.
 app.get('/api/ranking', requerirSesion, operacion(async (req) => ranking.publico(req.usuario.uid)));
 // El CEO ve la semana completa (por defecto la que acaba de terminar) y entrega los premios.
