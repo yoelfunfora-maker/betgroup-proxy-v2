@@ -106,6 +106,12 @@ function descifrar(cuerpo, tel) {
     [s, j] = await llamar('GET', '/api/notificaciones', null, tR);
     ok(s === 200 && j.noLeidas === 1 && j.avisos[0].tipo === 'bienvenida', 'al registrarse recibe el aviso de bienvenida (1 sin leer) → ' + (j.avisos[0] || {}).titulo);
 
+    // Aviso al CEO: alguien nuevo entró
+    await new Promise(r => setTimeout(r, 200));
+    const avisosCeo = Object.values(get('notificaciones/BG_ceo') || {});
+    ok(avisosCeo.some(a => a.tipo === 'nuevo_miembro' && /Gacela_9 se registró/.test(a.texto)), 'el CEO recibe "Nuevo miembro en BetGroup" → ' + ((avisosCeo.find(a => a.tipo === 'nuevo_miembro') || {}).texto));
+    ok(!Object.values(get('notificaciones/BG_otro') || {}).some(a => a.tipo === 'nuevo_miembro'), 'un jugador cualquiera no recibe ese aviso');
+
     // Depósito aprobado
     const tC = await entrar('ceo@x.com');
     set('solicitudesDeposito/D1', { id: 'D1', userId: uid, nombre: 'Rosa Nueva', monto: 500, moneda: 'CUP', estado: 'pendiente', creadoEn: Date.now() });
