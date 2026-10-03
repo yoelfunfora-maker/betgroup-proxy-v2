@@ -854,6 +854,20 @@ function precalentarCache() {
   return cargaPartidos;
 }
 
+// Decisión de Yoel (3 oct 2026): lo que se publica depende de las cuotas reales. Un partido sin
+// cuota de ningún proveedor NO se muestra (antes salía una tarjeta "Sin cuota real todavía").
+// Internamente se conservan todos (calendario de favoritos, diagnóstico, liquidación).
+// config/mostrarPartidosSinCuota = true los vuelve a mostrar.
+let mostrarSinCuota = false;
+function publicable(e) {
+  return Boolean(e) && !e.bloqueado && Number(e.cuota_local) > 1 && Number(e.cuota_visitante) > 1;
+}
+function versionPublica(respuesta) {
+  if (mostrarSinCuota) return respuesta;
+  const data = respuesta.data.filter(publicable);
+  return { ...respuesta, total: data.length, en_vivo: data.filter(e => e.estado === 'live').length, proximos: data.filter(e => e.estado === 'scheduled').length, data };
+}
+
 async function cargarPartidos() {
   console.log('⏳ Precalentando caché...');
 
@@ -873,10 +887,12 @@ async function cargarPartidos() {
   await enriquecerConCuotas(allEvents);
   // Cuotas del bot (nodo mercados) y boxeo: antes lo mezclaba el navegador.
   try {
-    const [mercadosSnap, margenSnap] = await Promise.all([
+    const [mercadosSnap, margenSnap, sinCuotaSnap] = await Promise.all([
       db.ref('mercados').once('value'),
-      db.ref('config/margen').once('value')
+      db.ref('config/margen').once('value'),
+      db.ref('config/mostrarPartidosSinCuota').once('value')
     ]);
+    mostrarSinCuota = sinCuotaSnap.val() === true;
     const margen = Number(margenSnap.val());
     allEvents = fusionarCuotasBot(allEvents, mercadosSnap.val(), Number.isFinite(margen) && margen >= 0 && margen < 1 ? margen : 0.20);
   } catch (err) {
@@ -899,6 +915,7 @@ async function cargarPartidos() {
   };
 
   setCache('fixtures', response);
+  setCache('fixturesPublico', versionPublica(response));
   console.log(`✅ Caché precalentado: ${allEvents.length} eventos`);
   try { registrarSinCuota(allEvents); } catch (e) { console.warn('Informe de partidos sin cuota:', e.message); }
 }
@@ -1388,12 +1405,13 @@ app.post('/api/db', requerirSesion, limiteDb, proxyDb.manejar);
 
 app.get('/api/fixtures', async (req, res) => {
   try {
-    const cached = getCache('fixtures');
+    // A la web solo van los partidos con cuota real (ver versionPublica).
+    const cached = getCache('fixturesPublico');
     if (cached) {
       return res.json(cached);
     }
     // Caducada pero existente: se entrega al momento y se actualiza por detrás.
-    const viejo = cache.fixtures && cache.fixtures.data;
+    const viejo = cache.fixturesPublico && cache.fixturesPublico.data;
     if (viejo) {
       precalentarCache().catch(e => console.error('Recalcular partidos:', e.message));
       return res.json(viejo);

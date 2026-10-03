@@ -65,7 +65,7 @@ setTimeout(async () => {
     const tCeo = (await llamar('POST', '/api/auth/login', { identificador: 'ceo@x.com', password: 'ceo-clave-1' }))[1].token;
     let [s, j] = await llamar('GET', '/api/fixtures');
     const sinCuotas = (j.data || []).find(e => e.id === '888');
-    ok(sinCuotas && sinCuotas.bloqueado === true && !sinCuotas.cuota_local, 'partido sin cuota real: bloqueado, sin cuota inventada');
+    ok(!sinCuotas && (j.data || []).some(e => e.id === '777'), 'partido sin cuota real: NO se publica (solo se ven los que tienen cuota de un proveedor)');
     [s] = await llamar('POST', '/api/apostar', { eventoId: '888', tipo: 'Local', amount: 100 }, t);
     ok(s === 409, 'no se puede apostar a un partido sin cuota real → ' + s);
 

@@ -22,6 +22,8 @@ const velada = {
   }]
 };
 const fetchReal = global.fetch; // el simulador corta la red; guardamos la de verdad para hablar con el servidor local
+// La pelea de MMA de prueba no tiene cuota: se muestran también los partidos sin cuota para revisar las fotos.
+set('config/mostrarPartidosSinCuota', true);
 arrancar({
   puerto: 3995,
   env: { ODDS_API_KEYS: '' },

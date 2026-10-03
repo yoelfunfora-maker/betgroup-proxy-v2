@@ -38,6 +38,8 @@ const espn = (ruta) => {
   return null;
 };
 set('config', { minBet: 100, maxBet: 500 });
+// Los partidos de ejemplo no tienen cuota: se muestran igual (aquí se prueba el perfil, no las cuotas).
+set('config/mostrarPartidosSinCuota', true);
 arrancar({ puerto: PUERTO_API, env: { ODDS_API_KEYS: '', ALLOWED_ORIGINS: `http://127.0.0.1:${PUERTO_WEB}` }, espn });
 
 const TIPOS = { '.css': 'text/css', '.webp': 'image/webp', '.js': 'text/javascript', '.woff2': 'font/woff2', '.png': 'image/png', '.json': 'application/json' };
