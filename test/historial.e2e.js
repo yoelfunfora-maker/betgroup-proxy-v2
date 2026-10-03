@@ -45,6 +45,11 @@ set('apuestas/BG_ag/A1', { eventoNombre: 'Genoa vs Fiorentina', tipo: 'Local', m
 set('apuestas/BG_ag/A2', { evento: 'Arsenal vs Leeds', seleccion: 'Visitante', amount: 100, odds: 3.4, estado: 'pendiente', fecha: ahora - 3600e3 }); // formato antiguo
 set('apuestas/BG_ag/A3', { eventoNombre: 'Napoli vs Frosinone', tipo: 'Local', monto: 200, cuota: 1.5, estado: 'ganada', fecha: ahora - 7200e3 });
 
+// 25 apuestas del sistema antiguo con claves de letras (en Firebase van DESPUÉS de las nuevas "-O…").
+for (let k = 0; k < 25; k++) set(`apuestas/BG_ag/bet_${String(k).padStart(3, '0')}`, { estado: 'anulada', pagado: true, liquidadaEn: ahora - 30 * 864e5 });
+// Apuesta NUEVA (clave como las de Firebase: empieza por "-"), la más reciente de todas.
+set('apuestas/BG_ag/-OzNueva001', { eventoNombre: 'Real Madrid vs Villarreal', tipo: 'Local', monto: 120, cuota: 1.6, estado: 'pendiente', fecha: ahora - 60e3 });
+
 (async () => {
   const navegador = await chromium.launch();
   const pagina = await navegador.newPage({ viewport: { width: 400, height: 860 } });
@@ -83,10 +88,12 @@ set('apuestas/BG_ag/A3', { eventoNombre: 'Napoli vs Frosinone', tipo: 'Local', m
     const txt = await pagina.textContent('#histList');
     const tarjetas = await pagina.$$eval('#histList > div', d => d.length);
     ok(!/undefined|NaN/.test(txt), 'el historial ya no muestra "undefined" en ningún sitio');
-    ok(tarjetas === 3, 'la apuesta antigua incompleta (sin partido ni monto) desaparece: se ven 3 de 4 → ' + tarjetas);
+    ok(tarjetas === 4, 'las 26 apuestas antiguas incompletas (sin partido ni monto) no se muestran: se ven solo las 4 completas → ' + tarjetas);
     ok(/Anulada: se te devolvieron 150 CR/.test(txt), 'una anulada dice que se devolvió el dinero (antes decía "Esperando resultado")');
     ok(/Arsenal vs Leeds/.test(txt) && /Visitante/.test(txt) && /100 CR/.test(txt), 'las apuestas con el formato antiguo se leen bien');
     ok(/Napoli vs Frosinone/.test(txt), 'las normales siguen igual');
+    ok(/Real Madrid vs Villarreal/.test(txt), 'la apuesta recién hecha aparece aunque haya muchas antiguas (antes quedaba fuera de "las últimas 20")');
+    ok(txt.indexOf('Real Madrid') < txt.indexOf('Napoli'), 'y aparece la primera (la más reciente arriba)');
     await pagina.locator('#histList').screenshot({ path: require('path').join(__dirname, 'captura-historial.png') });
     ok(!erroresJs.length, 'sin errores de JavaScript → ' + (erroresJs.slice(0, 3).join(' | ') || 'ninguno'));
   } catch (e) {
