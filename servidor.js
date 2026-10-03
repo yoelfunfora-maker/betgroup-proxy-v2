@@ -545,8 +545,44 @@ const sportKeyMap = Object.freeze({
   'mma': 'mma_mixed_martial_arts',
   'tennis': function(liga){ return (liga && liga.toLowerCase().includes('wta')) ? 'tennis_wta_wimbledon' : 'tennis_atp_wimbledon'; }
 });
+// Selecciones: The Odds API cambia las claves según la temporada (eliminatorias, Liga de
+// Naciones, amistosos), así que se buscan por su título en la lista oficial de competiciones,
+// que es gratuita (no gasta créditos) y se renueva cada 12 h.
+const SELECCIONES_POR_RUTA = Object.freeze({
+  'soccer/fifa.friendly': [/friendl/i],
+  'soccer/uefa.nations': [/nations league/i, /uefa/i],
+  'soccer/concacaf.nations.league': [/concacaf/i, /nations/i],
+  'soccer/fifa.worldq.uefa': [/world cup/i, /qualif/i, /europe|uefa/i],
+  'soccer/fifa.worldq.conmebol': [/world cup/i, /qualif/i, /south america|conmebol/i],
+  'soccer/fifa.worldq.concacaf': [/world cup/i, /qualif/i, /concacaf|north america/i],
+  // La Eurocopa: se excluye "World Cup Qualifiers - Europe", que también contiene "euro".
+  'soccer/uefa.euroq': [/euro/i, /qualif/i, /^(?![\s\S]*world cup)/i]
+});
+const deportesOdds = { lista: [], cargadaEn: 0 };
+async function cargarDeportesOdds() {
+  if (Date.now() - deportesOdds.cargadaEn < 12 * 3600000 && deportesOdds.lista.length) return deportesOdds.lista;
+  for (const key of config.oddsApiKeys) {
+    try {
+      const r = await axios.get(`https://api.the-odds-api.com/v4/sports?apiKey=${encodeURIComponent(key)}`, { timeout: 8000 });
+      if (Array.isArray(r.data)) {
+        deportesOdds.lista = r.data.filter(d => d && d.group === 'Soccer' && !d.has_outrights);
+        deportesOdds.cargadaEn = Date.now();
+        return deportesOdds.lista;
+      }
+    } catch (e) { /* se prueba la siguiente clave */ }
+  }
+  return deportesOdds.lista;
+}
+function claveSelecciones(ruta) {
+  const patrones = SELECCIONES_POR_RUTA[ruta];
+  if (!patrones) return null;
+  const d = deportesOdds.lista.find(x => patrones.every(re => re.test(`${x.title || ''} ${x.description || ''}`)));
+  return d ? d.key : null;
+}
+
 // Competición de The Odds API para un partido (null = no se piden cuotas).
 function claveOdds(evento) {
+  if (evento.sport === 'soccer' && evento.ruta && !ODDS_POR_RUTA[evento.ruta] && SELECCIONES_POR_RUTA[evento.ruta]) return claveSelecciones(evento.ruta);
   const v = sportKeyMap[evento.sport];
   return (typeof v === 'function' ? v(evento.liga, evento.ruta) : v) || null;
 }
@@ -622,6 +658,8 @@ function asignarCuotas(eventosGrupo, juegos, fuente) {
 }
 
 async function enriquecerConCuotas(eventos) {
+  // Lista de competiciones de The Odds API (gratis, sin gastar cuota): da la clave de los torneos de selecciones.
+  await cargarDeportesOdds().catch(() => {});
   const apiKey = getApiKey();
   if (!apiKey) {
     console.warn('⚠️ Sin The Odds API Key - usando cuotas por defecto');
@@ -750,6 +788,13 @@ const DEPORTES = [
   { path: 'baseball/mlb/scoreboard', sport: 'baseball' },
   { path: 'soccer/fifa.world/scoreboard', sport: 'soccer' },
   { path: 'soccer/fifa.friendly/scoreboard', sport: 'soccer' },
+  // Selecciones (decisión de Yoel, 3 oct 2026): Liga de Naciones y eliminatorias.
+  { path: 'soccer/uefa.nations/scoreboard', sport: 'soccer' },
+  { path: 'soccer/concacaf.nations.league/scoreboard', sport: 'soccer' },
+  { path: 'soccer/fifa.worldq.uefa/scoreboard', sport: 'soccer' },
+  { path: 'soccer/fifa.worldq.conmebol/scoreboard', sport: 'soccer' },
+  { path: 'soccer/fifa.worldq.concacaf/scoreboard', sport: 'soccer' },
+  { path: 'soccer/uefa.euroq/scoreboard', sport: 'soccer' },
   { path: 'soccer/eng.1/scoreboard', sport: 'soccer' },
   { path: 'soccer/esp.1/scoreboard', sport: 'soccer' },
   { path: 'soccer/ger.1/scoreboard', sport: 'soccer' },
