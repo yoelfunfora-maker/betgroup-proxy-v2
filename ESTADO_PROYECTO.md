@@ -317,3 +317,6 @@ Revisión previa: el "Entrar con Google" antiguo nunca funcionó en la versión 
 **Campana de avisos (web):** contador en la cabecera, bandeja (leer uno / todos, ir a su pantalla), suscripción Web Push al entrar o al dar permiso, baja al cerrar sesión. `sw.js` v4 muestra los avisos con la app cerrada. Pruebas: `test/campana.e2e.js`, `test/historial.e2e.js`.
 **Publicación:** solo se publican partidos con cuota real (`config/mostrarPartidosSinCuota` para mostrar todos). Amistosos y CONCACAF por API-Football (falta que Yoel guarde la clave).
 **Comisiones:** el 3 % de inyección se queda como está (personal, sin tope) — decisión de Yoel.
+
+**Comisiones (decisión de Yoel, 3 oct 2026):** agente **5 % fijo** de la ganancia de su red (se quitó la escala 5-25 %), supervisor **10 %** de la ganancia de sus agentes, y se mantiene el **3 % fijo** de la inyección neta de los jugadores activos del agente. Todo solo si la semana deja ganancia; las pérdidas se arrastran. La casa conserva ≥ 85 % de la ganancia. Guía del agente actualizada: https://claude.ai/artifact/6dqM2Cdz9R5VkNqNy1Ni6C
+**Favoritos:** se eligen de un catálogo real de equipos de ESPN (`lib/equipos.js`, `catalogoEquipos` en Firebase, renovado cada 7 días); buscador letra a letra con escudo, liga y país; se guardan por id y los partidos se reconocen por id (`localId`/`visitanteId`).
