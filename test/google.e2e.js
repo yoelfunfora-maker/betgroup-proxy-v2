@@ -48,7 +48,7 @@ const GSI = `window.google={accounts:{id:{_cb:null,initialize:function(o){this._
   renderButton:function(el){var b=document.createElement('button');b.id='botonGoogleFalso';b.textContent='Continuar con Google';var s=this;b.onclick=function(){s._cb({credential:window.__tokenGoogle||${JSON.stringify(TOKEN)}});};el.appendChild(b);}}}};`;
 const TURN = `window.turnstile={render:function(el,o){var d=document.createElement('div');d.id='casillaFalsa';d.textContent='✓ No soy un robot';el.appendChild(d);setTimeout(function(){o.callback('humano-ok');},50);return 'w1';},reset:function(){window.__turnReset=(window.__turnReset||0)+1;}};`;
 
-const TIPOS = { '.webp': 'image/webp', '.js': 'text/javascript', '.woff2': 'font/woff2', '.png': 'image/png', '.json': 'application/json' };
+const TIPOS = { '.css': 'text/css', '.webp': 'image/webp', '.js': 'text/javascript', '.woff2': 'font/woff2', '.png': 'image/png', '.json': 'application/json' };
 http.createServer((req, res) => {
   const f = path.join(FRONT, decodeURIComponent(req.url.split('?')[0]).replace(/^\/+/, '') || 'index.html');
   if (!f.startsWith(FRONT) || !fs.existsSync(f) || fs.statSync(f).isDirectory()) { res.writeHead(404); return res.end(); }

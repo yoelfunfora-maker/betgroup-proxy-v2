@@ -36,7 +36,7 @@ sol('S1', 'BG_p1', 'Pedro Uno', 600); sol('S2', 'BG_q1', 'Quique Ajeno', 700); s
 set('config', { minBet: 100, maxBet: 500 });
 arrancar({ puerto: PUERTO_API, env: { ODDS_API_KEYS: '', ALLOWED_ORIGINS: `http://127.0.0.1:${PUERTO_WEB}` } });
 
-const TIPOS = { '.webp': 'image/webp', '.js': 'text/javascript', '.woff2': 'font/woff2', '.png': 'image/png', '.json': 'application/json' };
+const TIPOS = { '.css': 'text/css', '.webp': 'image/webp', '.js': 'text/javascript', '.woff2': 'font/woff2', '.png': 'image/png', '.json': 'application/json' };
 http.createServer((req, res) => {
   const f = path.join(FRONT, decodeURIComponent(req.url.split('?')[0]).replace(/^\/+/, '') || 'index.html');
   if (!f.startsWith(FRONT) || !fs.existsSync(f) || fs.statSync(f).isDirectory()) { res.writeHead(404); return res.end(); }
@@ -77,9 +77,24 @@ http.createServer((req, res) => {
     await pagina.evaluate(() => { if (typeof cerrarTutorial === 'function') cerrarTutorial(); });
   };
 
+  // Ningún emoji visible: texto de la página, opciones de listas y avisos.
+  const EMOJI = /(?:[\u{1F000}-\u{1FAFF}\u2600-\u27BF\u2B00-\u2BFF\u2300-\u23FF])/u;
+  const emojisVisibles = async (panel) => {
+    if (panel) { await pagina.evaluate((p) => goPanel(p), panel); await pagina.waitForTimeout(2500); }
+    return pagina.evaluate((re) => {
+      const r = new RegExp(re, 'u');
+      const textos = [document.body.innerText, ...Array.from(document.querySelectorAll('option')).map(o => o.textContent)];
+      return textos.filter(t => r.test(t)).map(t => (t.match(new RegExp(re, 'gu')) || []).join('')).join('');
+    }, EMOJI.source);
+  };
+  const sinEmojis = [];
   try {
     await pagina.goto(`http://127.0.0.1:${PUERTO_WEB}/index.html`);
     await pagina.evaluate(() => { localStorage.setItem('betgroup_terms_accepted', 'true'); ['jugador', 'agente', 'supervisor', 'ceo'].forEach(t => localStorage.setItem('bg_tutorial_' + t, '1')); });
+
+    await pagina.reload(); await pagina.waitForTimeout(3200);
+    sinEmojis.push(['pantalla de acceso', await emojisVisibles()]);
+    await pagina.evaluate(() => showReg()); sinEmojis.push(['crear cuenta', await emojisVisibles()]);
 
     // ---- CEO en su panel de AGENTE: solo su propio jugador ----
     await entrar('c@x.com');
@@ -90,6 +105,8 @@ http.createServer((req, res) => {
     ok(/Cliente Del Ceo/.test(solCeo) && !/Pedro Uno|Quique Ajeno/.test(solCeo), 'CEO en su panel de agente: ve el depósito de SU jugador y no los de Alfredo ni de otros → ' + solCeo.replace(/\s+/g, ' ').slice(0, 80));
     const opciones = await pagina.$$eval('#subMember option', (o) => o.map(x => x.textContent).join(' | '));
     ok(!/Pedro|Pablo|Quique/.test(opciones), 'y en "Recargar a un jugador" no salen los jugadores de otros agentes → ' + opciones);
+
+    for (const p of ['home', 'pagos', 'retiros', 'sub', 'director', 'ceo']) sinEmojis.push(['CEO ' + p, await emojisVisibles(p)]);
 
     // ---- Supervisora: Mi red con Alfredo y sus jugadores; depósitos solo de su red ----
     await entrar('s@x.com');
@@ -108,12 +125,28 @@ http.createServer((req, res) => {
     const solSup = await pagina.textContent('#solicitudesList');
     ok(/Pedro Uno/.test(solSup) && !/Quique Ajeno|Cliente Del Ceo/.test(solSup), 'supervisora: solo ve los depósitos de su red (antes veía los de toda la casa)');
 
+    for (const p of ['home', 'sub', 'director']) sinEmojis.push(['supervisora ' + p, await emojisVisibles(p)]);
+
     // ---- Alfredo (agente): solo sus jugadores ----
     await entrar('alf@x.com');
     await pagina.evaluate(() => goPanel('sub'));
     await pagina.waitForFunction(() => /Pedro Uno|Sin solicitudes/.test(document.getElementById('subSolicitudesPendientes').textContent), null, { timeout: 15000 });
     const solAlf = await pagina.textContent('#subSolicitudesPendientes');
     ok(/Pedro Uno/.test(solAlf) && !/Quique Ajeno|Cliente Del Ceo/.test(solAlf), 'Alfredo: solo los depósitos de sus jugadores');
+
+    for (const p of ['home', 'pagos', 'retiros', 'sub']) sinEmojis.push(['agente ' + p, await emojisVisibles(p)]);
+    const conEmoji = sinEmojis.filter(([, e]) => e);
+    ok(!conEmoji.length, 'ningún emoji visible en ' + sinEmojis.length + ' pantallas (CEO, supervisora, agente)' + (conEmoji.length ? ' → ' + conEmoji.map(x => x.join(': ')).join(' | ') : ''));
+    const iconos = await pagina.evaluate(async () => { await document.fonts.ready; const i = document.querySelector('.tab i'); return { n: document.querySelectorAll('i.fa-solid, i.fas').length, fuente: /Font Awesome/.test(getComputedStyle(i).fontFamily) && getComputedStyle(i, '::before').content !== 'none', css: Array.from(document.styleSheets).some(x => /\/fuentes\/fa\/css\/all\.min\.css$/.test(x.href || '')) }; });
+    ok(iconos.n > 20 && iconos.fuente && iconos.css, 'los iconos profesionales salen de la propia web (sin servidores externos): ' + JSON.stringify(iconos));
+    await pagina.evaluate(() => toast('✅ Depósito aprobado', 'green', 5000));
+    await pagina.waitForTimeout(200);
+    ok(await pagina.$('#toast i.fa-circle-check') && !/✅/.test(await pagina.textContent('#toast')), 'un aviso con emoji sale con su icono profesional (✓ verde)');
+    await pagina.evaluate(() => goPanel('home')); await pagina.waitForTimeout(800);
+    await pagina.screenshot({ path: path.join(__dirname, 'captura-pestanas-iconos.png') });
+    const pest = await pagina.evaluate(() => Array.from(document.querySelectorAll('.tab')).filter(t => t.offsetParent).map(t => { const i = t.querySelector('i'); return i && i.getBoundingClientRect().height > 10 && /Font Awesome/.test(getComputedStyle(i).fontFamily); }));
+    ok(pest.length >= 4 && pest.every(Boolean), 'las pestañas de abajo muestran su icono (dibujado con la fuente de iconos)');
+    await pagina.evaluate(() => goPanel('sub')); await pagina.waitForTimeout(800);
 
     // ---- Alfredo genera un código y lo comparte por enlace ----
     await pagina.fill('#subCodeQty', '1');

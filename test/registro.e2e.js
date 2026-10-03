@@ -35,7 +35,7 @@ arrancar({
 http.createServer((req, res) => {
   const f = path.join(FRONT, decodeURIComponent(req.url.split('?')[0]).replace(/^\/+/, '') || 'index.html');
   if (!f.startsWith(FRONT) || !fs.existsSync(f) || fs.statSync(f).isDirectory()) { res.writeHead(404); return res.end(); }
-  res.writeHead(200, { 'content-type': f.endsWith('.js') ? 'text/javascript' : f.endsWith('.woff2') ? 'font/woff2' : 'text/html; charset=utf-8' });
+  res.writeHead(200, { 'content-type': f.endsWith('.js') ? 'text/javascript' : f.endsWith('.woff2') ? 'font/woff2' : f.endsWith('.css') ? 'text/css' : 'text/html; charset=utf-8' });
   fs.createReadStream(f).pipe(res);
 }).listen(PUERTO_WEB);
 
