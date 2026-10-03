@@ -878,6 +878,7 @@ async function cargarPartidos() {
 
   setCache('fixtures', response);
   console.log(`✅ Caché precalentado: ${allEvents.length} eventos`);
+  try { registrarSinCuota(allEvents); } catch (e) { console.warn('Informe de partidos sin cuota:', e.message); }
 }
 
 // ==================== ENDPOINTS ====================
@@ -937,6 +938,60 @@ app.post('/api/admin/asignar-rol', soloCEO, operacion((req) => operaciones.asign
 app.post('/api/admin/restablecer-clave', soloCEO, operacion((req) => operaciones.restablecerClave(req)));
 app.post('/api/admin/eliminar-usuario', soloCEO, operacion((req) => operaciones.eliminarUsuario(req)));
 // Diagnóstico de cuotas: ¿por qué un partido sale sin cuota? (busca por nombre de equipo)
+// Por qué un partido tiene (o no) cuota, en palabras. Lo usan el diagnóstico del CEO y el registro
+// automático de partidos sin cuota.
+function diagnosticoCuota(e, nCandidatos = 3) {
+  const sportKey = claveOdds(e);
+  const juegos = (sportKey && oddsCache[sportKey]?.data) || [];
+  const candidatos = juegos
+    .map(g => ({ partidoOddsApi: `${g.home_team} vs ${g.away_team}`, inicio: g.commence_time, casas: g.casas ?? (g.bookmakers || []).length, parecido: Number(coincideEquipo(e, g).score.toFixed(2)) }))
+    .sort((a, b) => b.parecido - a.parecido).slice(0, nCandidatos);
+  const faltaMs = Date.parse(e.horaInicio || '') - Date.now();
+  let motivo;
+  if (Number(e.cuota_local) > 1) motivo = `Tiene cuota (${e.fuenteCuotas || 'bot'})`;
+  else if (!sportKey) motivo = 'Esta competición no está conectada a The Odds API';
+  else if (faltaMs > HORIZONTE_CUOTAS_MS && !juegos.length) motivo = 'Faltan más de 8 días: las cuotas se piden una semana antes';
+  else if (!juegos.length) motivo = 'The Odds API no devolvió partidos de esta competición (o no quedan créditos)';
+  else motivo = 'Ningún partido de The Odds API coincide (revisar nombres en mejoresCandidatos)';
+  return {
+    partido: `${e.local} vs ${e.visitante}`, liga: e.liga, ruta: e.ruta, inicio: e.horaInicio, motivo,
+    competicionOddsApi: sportKey, region: sportKey ? regionDeCuotas(sportKey) : null,
+    cuotas: { local: e.cuota_local, empate: e.cuota_empate, visitante: e.cuota_visitante },
+    partidosEnOddsApi: juegos.length,
+    cacheCuotas: sportKey && oddsCache[sportKey] ? new Date(oddsCache[sportKey].timestamp).toISOString() : null,
+    mejoresCandidatos: candidatos
+  };
+}
+
+// Registro automático: cuando cambia la lista de partidos sin cuota, se escribe en el log por qué.
+let ultimoInformeSinCuota = '';
+function registrarSinCuota(eventos) {
+  const sin = eventos.filter(e => e.estado === 'scheduled' && !(Number(e.cuota_local) > 1));
+  const lineas = sin.map(e => {
+    const d = diagnosticoCuota(e, 1);
+    const c = d.mejoresCandidatos[0];
+    return `${d.partido} [${d.ruta || e.sport}] → ${d.competicionOddsApi || '-'} (${d.partidosEnOddsApi} en API, copia ${d.cacheCuotas || 'ninguna'}): ${d.motivo}${c ? ` · más parecido: ${c.partidoOddsApi} ${c.inicio} (${c.parecido})` : ''}`;
+  });
+  // Margen de la casa en cada partido con cuota: suma de probabilidades implícitas − 100 %.
+  const margenes = {};
+  for (const e of eventos) {
+    const c = [e.cuota_local, e.cuota_empate, e.cuota_visitante].map(Number).filter(x => x > 1);
+    if (!(Number(e.cuota_local) > 1) || !(Number(e.cuota_visitante) > 1)) continue;
+    const m = c.reduce((t, x) => t + 1 / x, 0) - 1;
+    (margenes[e.sport] = margenes[e.sport] || []).push(m);
+  }
+  const resumenMargen = Object.entries(margenes).map(([dep, l]) => {
+    const orden = [...l].sort((x, y) => x - y);
+    const media = l.reduce((t, x) => t + x, 0) / l.length;
+    return `${dep}: media ${(media * 100).toFixed(1)}% (mín ${(orden[0] * 100).toFixed(1)}%, máx ${(orden[orden.length - 1] * 100).toFixed(1)}%, ${l.length} partidos)`;
+  }).join(' | ');
+  const informe = lineas.join('\n') + '|' + resumenMargen;
+  if (informe === ultimoInformeSinCuota) return;
+  ultimoInformeSinCuota = informe;
+  console.log(`Partidos sin cuota: ${sin.length} de ${eventos.length}${lineas.length ? '\n' + lineas.join('\n') : ''}`);
+  console.log(`Margen de la casa en las cuotas ofrecidas → ${resumenMargen || 'sin datos'}`);
+}
+
 app.get('/api/admin/diagnostico-cuotas', soloCEO, operacion(async (req) => {
   const q = limpiarNombre(validar.texto(req.query?.q, 60) || '');
   if (q.length < 3) throw new ErrorOperacion(400, 'Escribe al menos 3 letras de un equipo (o "sincuota")');
@@ -948,29 +1003,7 @@ app.get('/api/admin/diagnostico-cuotas', soloCEO, operacion(async (req) => {
   return {
     creditosOddsApi: estadoOddsApi,
     apiFootball: apiFootball.estado,
-    partidos: eventos.map(e => {
-      const sportKey = claveOdds(e);
-      const juegos = (sportKey && oddsCache[sportKey]?.data) || [];
-      const candidatos = juegos
-        .map(g => ({ partidoOddsApi: `${g.home_team} vs ${g.away_team}`, inicio: g.commence_time, casas: g.casas ?? (g.bookmakers || []).length, parecido: Number(coincideEquipo(e, g).score.toFixed(2)) }))
-        .sort((a, b) => b.parecido - a.parecido).slice(0, q === 'sincuota' ? 1 : 3);
-      // Explicación en palabras de por qué tiene (o no) cuota.
-      const faltaMs = Date.parse(e.horaInicio || '') - Date.now();
-      let motivo;
-      if (Number(e.cuota_local) > 1) motivo = `Tiene cuota (${e.fuenteCuotas || 'bot'})`;
-      else if (!sportKey) motivo = 'Esta competición no está conectada a The Odds API';
-      else if (faltaMs > HORIZONTE_CUOTAS_MS && !juegos.length) motivo = 'Faltan más de 8 días: las cuotas se piden una semana antes';
-      else if (!juegos.length) motivo = 'The Odds API no devolvió partidos de esta competición (o no quedan créditos)';
-      else motivo = 'Ningún partido de The Odds API coincide (revisar nombres en mejoresCandidatos)';
-      return {
-        partido: `${e.local} vs ${e.visitante}`, liga: e.liga, ruta: e.ruta, inicio: e.horaInicio, motivo,
-        competicionOddsApi: sportKey, region: sportKey ? regionDeCuotas(sportKey) : null,
-        cuotas: { local: e.cuota_local, empate: e.cuota_empate, visitante: e.cuota_visitante },
-        partidosEnOddsApi: juegos.length,
-        cacheCuotas: sportKey && oddsCache[sportKey] ? new Date(oddsCache[sportKey].timestamp).toISOString() : null,
-        mejoresCandidatos: candidatos
-      };
-    })
+    partidos: eventos.map(e => diagnosticoCuota(e, q === 'sincuota' ? 1 : 3))
   };
 }));
 // ---------- Ranking semanal y apodo ----------
