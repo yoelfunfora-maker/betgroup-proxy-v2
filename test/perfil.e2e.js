@@ -30,9 +30,17 @@ ap('b5', { estado: 'pendiente', monto: 50, cuota: 2, sport: 'soccer', t: Date.UT
 ap('b6', { estado: 'anulada', monto: 100, cuota: 2, sport: 'soccer', t: Date.UTC(2026, 2, 6) });
 // Partidos que manda ESPN: uno de su equipo en 30 minutos, otro mañana y uno que no es de sus equipos
 const enMin = (m) => new Date(Date.now() + m * 60000).toISOString();
+// Ids oficiales de ESPN (los favoritos se reconocen por id).
+const ID = { Arsenal: 359, Chelsea: 363, Liverpool: 364, Everton: 368, Internazionale: 110, Parma: 115, Atalanta: 105 };
 const partido = (id, local, visit, fecha) => ({ id, date: fecha, status: { type: { state: 'pre' } }, competitions: [{ status: { type: { state: 'pre' } }, competitors: [
-  { homeAway: 'home', team: { displayName: local } }, { homeAway: 'away', team: { displayName: visit } }] }] });
+  { homeAway: 'home', team: { id: String(ID[local]), displayName: local } }, { homeAway: 'away', team: { id: String(ID[visit]), displayName: visit } }] }] });
+// Catálogo de equipos de ESPN (más de 50, como el real)
+const equipoEspn = (id, nombre) => ({ team: { id: String(id), displayName: nombre, logos: [{ href: `https://a.espncdn.com/i/teamlogos/soccer/500/${id}.png` }] } });
+const teamsDe = (l) => JSON.stringify({ sports: [{ leagues: [{ teams: l }] }] });
 const espn = (ruta) => {
+  if (/eng\.1\/teams/.test(ruta)) return teamsDe(['Arsenal', 'Chelsea', 'Liverpool', 'Everton'].map(n => equipoEspn(ID[n], n)).concat(Array.from({ length: 50 }, (_, i) => equipoEspn(7000 + i, `Club Relleno ${i}`))));
+  if (/ita\.1\/teams/.test(ruta)) return teamsDe(['Internazionale', 'Parma', 'Atalanta'].map(n => equipoEspn(ID[n], n)));
+  if (/\/teams/.test(ruta)) return teamsDe([]);
   if (/eng\.1/.test(ruta)) return JSON.stringify({ leagues: [{ name: 'Premier League' }], events: [partido('900001', 'Arsenal', 'Chelsea', enMin(30)), partido('900002', 'Liverpool', 'Everton', enMin(60 * 26))] });
   if (/ita\.1/.test(ruta)) return JSON.stringify({ leagues: [{ name: 'Serie A' }], events: [partido('900003', 'Internazionale', 'Parma', enMin(60 * 50))] });
   return null;
@@ -109,16 +117,26 @@ http.createServer((req, res) => {
     ok(/\+150,00 CR/.test(st) && /75 %/.test(st) && /37,5 %/.test(st) && /Mejor racha ganadora/.test(st) && /1 seguida(?!s)/.test(st), 'se ven las estadísticas: +150,00 CR, 75 %, 37,5 %, rachas…');
     ok(await pagina.$('#statsContenido svg.bg-stats-graf rect'), 'y la gráfica de ganancia por mes');
 
-    // Favoritos
-    const sug = await pagina.$$eval('#favSugerencias option', o => o.map(x => x.value));
-    ok(sug.includes('Arsenal') && sug.includes('Internazionale'), 'al escribir sugiere los equipos que hay en la portada');
-    await pagina.fill('#favInput', 'Arsenal'); await pagina.click('#favAgregar');
+    // Favoritos: se ELIGEN del catálogo (letra a letra, con escudo)
+    await pagina.fill('#favInput', 'a');
+    await pagina.waitForSelector('#favResultados .bg-fav-op', { timeout: 15000 });
+    const conA = await pagina.$$eval('#favResultados .bg-fav-op b', o => o.map(x => x.textContent));
+    ok(conA.includes('Arsenal') && conA.includes('Atalanta') && !conA.includes('Chelsea'), 'con la letra "a" salen los equipos que empiezan por A → ' + conA.slice(0, 4).join(', '));
+    await pagina.fill('#favInput', 'ars');
+    await pagina.waitForFunction(() => { const o = document.querySelectorAll('#favResultados .bg-fav-op b'); return o.length === 1 && o[0].textContent === 'Arsenal'; }, null, { timeout: 10000 });
+    ok(await pagina.$('#favResultados .bg-fav-op img.bg-fav-escudo') && /Premier League · Inglaterra/.test(await pagina.textContent('#favResultados')), 'al completar "ars" queda solo Arsenal, con su escudo y "Premier League · Inglaterra"');
+    await pagina.locator('#favCard').screenshot({ path: path.join(__dirname, 'captura-buscador-equipos.png') });
+    await pagina.click('#favResultados .bg-fav-op');
     await pagina.waitForFunction(() => /Arsenal/.test(document.getElementById('favChips').textContent), null, { timeout: 10000 });
-    await pagina.fill('#favInput', 'Inter'); await pagina.press('#favInput', 'Enter');
-    await pagina.waitForFunction(() => /Inter/.test(document.getElementById('favChips').textContent), null, { timeout: 10000 });
-    ok(JSON.stringify(get('users/BG_fan/equiposFavoritos')) === '["Arsenal","Inter"]', 'añade favoritos (botón o Enter) y quedan guardados en el servidor');
+    await pagina.fill('#favInput', 'inter');
+    await pagina.waitForFunction(() => /Internazionale/.test(document.getElementById('favResultados').textContent), null, { timeout: 10000 });
+    await pagina.press('#favInput', 'Enter');
+    await pagina.waitForFunction(() => /Internazionale/.test(document.getElementById('favChips').textContent), null, { timeout: 10000 });
+    const favs = get('users/BG_fan/equiposFavoritos') || [];
+    ok(favs.length === 2 && favs[0].espnId === '359' && favs[1].espnId === '110' && favs[1].liga === 'Serie A', 'se eligen tocando (o con Enter) y se guarda el equipo exacto (id oficial 359 Arsenal, 110 Inter)');
+    ok(await pagina.$('#favChips .bg-fav-chip img'), 'el favorito elegido se ve con su escudo');
     const part = await pagina.textContent('#favPartidos');
-    ok(/Arsenal vs Chelsea/.test(part) && /Internazionale vs Parma/.test(part) && !/Liverpool/.test(part), 'muestra solo los partidos de sus equipos (Inter = Internazionale)');
+    ok(/Arsenal vs Chelsea/.test(part) && /Internazionale vs Parma/.test(part) && !/Liverpool/.test(part), 'muestra solo los partidos de sus equipos (reconocidos por su id oficial)');
     const enlace = await pagina.getAttribute('#favPartidos .bg-fav-cal', 'href');
     ok(/calendar\.google\.com\/calendar\/render\?action=TEMPLATE&text=Arsenal%20vs%20Chelsea&dates=\d{8}T\d{6}Z\/\d{8}T\d{6}Z/.test(enlace), 'cada partido tiene "Añadir" a Google Calendar con su hora');
     const g = await pagina.getAttribute('#calGoogle', 'href'), a = await pagina.getAttribute('#calApple', 'href');
@@ -131,9 +149,10 @@ http.createServer((req, res) => {
     ok(true, 'avisa cuando su equipo juega pronto (1 hora antes) → ' + (await pagina.textContent('#toast')).trim().slice(0, 80));
 
     // Quitar un favorito
-    await pagina.click('#favChips .bg-fav-chip:has-text("Inter") button');
-    await pagina.waitForFunction(() => !/Inter/.test(document.getElementById('favChips').textContent), null, { timeout: 10000 });
-    ok(JSON.stringify(get('users/BG_fan/equiposFavoritos')) === '["Arsenal"]' && !/Parma/.test(await pagina.textContent('#favPartidos')), 'quitar un favorito lo borra y sus partidos desaparecen');
+    await pagina.click('#favChips .bg-fav-chip:has-text("Internazionale") button');
+    await pagina.waitForFunction(() => !/Internazionale/.test(document.getElementById('favChips').textContent), null, { timeout: 10000 });
+    const quedan = get('users/BG_fan/equiposFavoritos') || [];
+    ok(quedan.length === 1 && quedan[0].nombre === 'Arsenal' && !/Parma/.test(await pagina.textContent('#favPartidos')), 'quitar un favorito lo borra y sus partidos desaparecen');
   } catch (e) {
     ok(false, 'excepción: ' + e.message.split('\n')[0]);
     await pagina.screenshot({ path: path.join(__dirname, 'fallo-perfil.png') });

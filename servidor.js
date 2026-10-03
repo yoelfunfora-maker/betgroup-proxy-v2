@@ -16,6 +16,7 @@ const validar = require('./lib/validacion');
 const { crearMotorApuestas, ErrorApuesta, centavos } = require('./lib/apuestas');
 const { crearWebPush } = require('./lib/webpush');
 const { crearVigilanteFirebase } = require('./lib/vigilanteFirebase');
+const { crearCatalogoEquipos } = require('./lib/equipos');
 const { crearNotificaciones, avisoApuesta, avisoLiquidacion } = require('./lib/notificaciones');
 const { crearRanking, semanaDe, semanaPorId, semanaAnterior } = require('./lib/ranking');
 const imagenes = require('./lib/imagenes');
@@ -280,6 +281,9 @@ function parseEvents(espnData, sport, ruta = null) {
         ligaLogo: espnData.leagues?.[0]?.logos?.[0]?.href || null,
         local: getName(home),
         visitante: getName(away),
+        // Id oficial de ESPN de cada lado: los favoritos se reconocen por id, no por el nombre.
+        localId: String((home.team && home.team.id) || (home.athlete && home.athlete.id) || '') || null,
+        visitanteId: String((away.team && away.team.id) || (away.athlete && away.athlete.id) || '') || null,
         homeLogo: getLogo(home),
         awayLogo: getLogo(away),
         marcador: isLive ? `${homeScore}-${awayScore}` : null,
@@ -1112,6 +1116,23 @@ async function publicarOfertasDelDia() {
 const limiteApodo = limitador({ ventanaMs: 60 * 60 * 1000, maximo: 20, clave: porUsuario });
 app.post('/api/perfil/apodo', requerirSesion, limiteApodo, operacion((req) => operaciones.fijarApodo(req)));
 
+// ==================== CATÁLOGO DE EQUIPOS (lib/equipos.js) ====================
+// Buscador del favorito: mientras se escribe, salen los equipos reales (escudo, liga, país).
+const catalogoEquipos = crearCatalogoEquipos({ db, fetchESPN: (r) => fetchESPN(r) });
+setTimeout(() => { catalogoEquipos.obtener().catch(e => console.warn('Catálogo de equipos:', e.message)); }, 60000).unref?.();
+const limiteBuscarEquipos = limitador({ ventanaMs: 60 * 1000, maximo: 120, clave: porUsuario });
+const publicoEquipo = (e) => ({ id: e.id, nombre: e.nombre, logo: e.logo, liga: e.liga, pais: e.pais, sport: e.sport });
+app.get('/api/equipos/buscar', requerirSesion, limiteBuscarEquipos, operacion(async (req) => {
+  const q = validar.texto(req.query?.q, 40) || '';
+  if (!q.trim()) return { equipos: [] };
+  if (!catalogoEquipos.listo()) {
+    // Primera vez tras un reinicio: se prepara (unos segundos) y la web vuelve a preguntar.
+    const listo = await Promise.race([catalogoEquipos.obtener().then(() => true, () => false), new Promise(r => setTimeout(() => r(false), 8000))]);
+    if (!listo) return { equipos: [], cargando: true };
+  }
+  return { equipos: (await catalogoEquipos.buscar(q, 50)).map(publicoEquipo) };
+}));
+
 // ==================== EQUIPOS FAVORITOS Y CALENDARIO (lib/calendario.js) ====================
 function urlsCalendario(req, uid) {
   const host = req.get('host') || 'betgroup-proxy-v2-8vqj.onrender.com';
@@ -1122,7 +1143,18 @@ function urlsCalendario(req, uid) {
 const limiteFavoritos = limitador({ ventanaMs: 60 * 60 * 1000, maximo: 60, clave: porUsuario });
 app.post('/api/perfil/favoritos', requerirSesion, limiteFavoritos, operacion(async (req) => {
   let equipos;
-  try { equipos = calendario.limpiarEquipos(req.body?.equipos); } catch (e) { throw new ErrorOperacion(400, e.message); }
+  if (Array.isArray(req.body?.ids)) {
+    // Forma nueva: equipos ELEGIDOS del catálogo (se guardan los datos del catálogo, nunca los del navegador).
+    const ids = [...new Set(req.body.ids.filter(x => typeof x === 'string' && /^[a-z]+:[0-9]{1,12}$/.test(x)))];
+    let legado;
+    try { legado = calendario.limpiarEquipos(Array.isArray(req.body.legado) ? req.body.legado : []); } catch (e) { throw new ErrorOperacion(400, e.message); }
+    const elegidos = (await catalogoEquipos.porIds(ids)).map(e => ({ id: e.id, espnId: e.espnId, sport: e.sport, nombre: e.nombre, logo: e.logo || null, liga: e.liga, pais: e.pais }));
+    if (elegidos.length !== ids.length) throw new ErrorOperacion(400, 'Elige el equipo de la lista de sugerencias');
+    equipos = [...legado, ...elegidos];
+    if (equipos.length > calendario.MAX_EQUIPOS) throw new ErrorOperacion(400, `Puedes elegir hasta ${calendario.MAX_EQUIPOS} equipos`);
+  } else {
+    try { equipos = calendario.limpiarEquipos(req.body?.equipos); } catch (e) { throw new ErrorOperacion(400, e.message); }
+  }
   await db.ref(`users/${req.usuario.uid}/equiposFavoritos`).set(equipos.length ? equipos : null);
   return { equipos, calendario: urlsCalendario(req, req.usuario.uid) };
 }));
