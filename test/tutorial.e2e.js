@@ -93,7 +93,7 @@ http.createServer((req, res) => {
     await pagina.click('#bgTut .bg-tut-atras'); await pagina.waitForTimeout(150);
     ok(/1 de/.test(await paso()), '"Atrás" vuelve al paso 1');
     const tj = await recorrer();
-    ok(tj.length >= 6 && !tj.includes('(sin zona iluminada)'), `recorre todos los pasos del jugador iluminando cada zona → ${tj.join(' / ')}`);
+    ok(tj.length >= 7 && !tj.includes('(sin zona iluminada)'), `recorre todos los pasos del jugador iluminando cada zona → ${tj.join(' / ')}`);
     ok(!(await pagina.$('#bgTut')), 'al terminar se cierra');
     await entrar('j@x.com');
     await pagina.waitForTimeout(3000);
