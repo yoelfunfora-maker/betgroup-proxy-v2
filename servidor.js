@@ -15,6 +15,7 @@ const { crearAutenticacion, NIVEL, normalizarClave } = require('./lib/autenticac
 const validar = require('./lib/validacion');
 const { crearMotorApuestas, ErrorApuesta, centavos } = require('./lib/apuestas');
 const { crearWebPush } = require('./lib/webpush');
+const { crearVigilanteFirebase } = require('./lib/vigilanteFirebase');
 const { crearNotificaciones, avisoApuesta, avisoLiquidacion } = require('./lib/notificaciones');
 const { crearRanking, semanaDe, semanaPorId, semanaAnterior } = require('./lib/ranking');
 const imagenes = require('./lib/imagenes');
@@ -82,6 +83,10 @@ try {
   console.error('Error al inicializar Firebase Admin SDK:', error.message);
   process.exit(1);
 }
+
+// Vigilante: si la conexión con Firebase se queda muerta, reconecta en segundos (ver lib/vigilanteFirebase.js).
+const vigilanteFirebase = crearVigilanteFirebase({ db });
+vigilanteFirebase.iniciar();
 
 // Registro de auditoría encadenado y firmado (ver lib/auditoria.js).
 const auditoria = crearAuditoria(db, config.auditoriaSecreto);
@@ -915,6 +920,7 @@ app.get('/api/health', (req, res) => {
   res.json({ 
     status: 'online', 
     uptime: process.uptime(), 
+    firebase: { latenciaMs: vigilanteFirebase.estado.ultimaLatenciaMs, reconexiones: vigilanteFirebase.estado.reconexiones, comprobado: vigilanteFirebase.estado.ultimaComprobacion },
     timestamp: new Date().toISOString() 
   });
 });
