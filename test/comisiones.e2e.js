@@ -89,8 +89,8 @@ http.createServer((req, res) => {
     await pagina.evaluate(() => goPanel('ceo'));
     await pagina.waitForSelector('#ceoComTabla >> text=Cerrar semana', { timeout: 20000 });
     const tabla = await pagina.textContent('#ceoComTabla');
-    ok(/Andres/.test(tabla) && /5 %/.test(tabla) && !/10 %/.test(tabla.replace(/supervis[^\n]*/gi, '')) && /250 CR/.test(tabla) && /500 CR/.test(tabla) && /4\.?250 CR/.test(tabla),
-      'el CEO ve: red de Andrés gana 5.000 → agente 5 % fijo = 250, supervisora 10 % = 500, casa 4.250');
+    ok(/Andres/.test(tabla) && /12 %/.test(tabla) && /600 CR/.test(tabla) && /900 CR/.test(tabla) && /3\.?500 CR/.test(tabla) && !/inyecci/i.test(tabla),
+      'el CEO ve: red de Andrés gana 5.000 → agente 12 % = 600, supervisora 18 % = 900, casa 3.500 (sin columnas de inyección)');
     await pagina.locator('#ceoComisionesCard').screenshot({ path: path.join(__dirname, 'captura-comisiones-ceo.png') });
     await pagina.click('#ceoComTabla >> text=Cerrar semana');
     await pagina.waitForSelector('#ceoComTabla >> text=Semana cerrada', { timeout: 15000 });
@@ -103,18 +103,18 @@ http.createServer((req, res) => {
     await pagina.evaluate(() => goPanel('sub'));
     await pagina.waitForFunction(() => /Tu porcentaje/.test(document.getElementById('subComisionDatos').textContent), null, { timeout: 15000 });
     const mia = await pagina.textContent('#subComisionDatos');
-    ok(/300 CR/.test(mia) && /5 %/.test(mia) && /15 CR/.test(mia), 'el agente ve su semana: red gana 300, 5 %, comisión estimada 15 CR');
+    ok(/300 CR/.test(mia) && /12 %/.test(mia) && /36 CR/.test(mia) && !/inyecci/i.test(mia), 'el agente ve su semana: red gana 300, 12 %, comisión estimada 36 CR (sin inyección)');
     await pagina.locator('#subComisionSemana').screenshot({ path: path.join(__dirname, 'captura-comision-agente.png') });
 
-    // ---- Supervisora: sus agentes y su 10 % ----
+    // ---- Supervisora: sus agentes y su 18 % ----
     await entrar('sup@x.com');
     await pagina.evaluate(() => goPanel('director'));
     await pagina.waitForSelector('#supComisionCard >> text=Andres', { timeout: 15000 });
     await pagina.waitForFunction(() => /Tus jugadores propios/.test(document.getElementById('supComisionDatos').textContent), null, { timeout: 15000 });
     const sup = await pagina.textContent('#supComisionDatos');
-    ok(/Por tu equipo \(10 %\)/.test(sup) && /30 CR/.test(sup) && /50 CR/.test(sup),
-      'la supervisora ve su 10 % de equipo (10 % de 300 = 30) y lo que cobra como agente por su cliente propio (5 % de 1.000 = 50)');
-    ok(/80 CR/.test(sup), 'su total estimado suma las dos cosas: 80 CR');
+    ok(/Por tu equipo \(18 %\)/.test(sup) && /54 CR/.test(sup) && /120 CR/.test(sup),
+      'la supervisora ve su 18 % de equipo (18 % de 300 = 54) y lo que cobra como agente por su cliente propio (12 % de 1.000 = 120)');
+    ok(/174 CR/.test(sup), 'su total estimado suma las dos cosas: 174 CR');
     await pagina.locator('#supComisionCard').screenshot({ path: path.join(__dirname, 'captura-comision-supervisor.png') });
   } catch (e) {
     ok(false, 'excepción: ' + e.message.split('\n')[0]);

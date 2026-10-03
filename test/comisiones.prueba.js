@@ -68,25 +68,25 @@ const entrar = async (uid) => (await llamar('POST', '/api/auth/login', { identif
     const A = j.agentes.find(a => a.uid === 'BG_A'), B = j.agentes.find(a => a.uid === 'BG_B');
     ok(s === 200 && A.jugadores === 8 && A.activos === 7, 'el agente A tiene 8 jugadores, pero solo 7 activos: el que solo jugó el bono no cuenta');
     ok(A.ganancia === 5850, 'ganancia de la red de A: 12.000 apostado − 6.000 pagado − 150 de promo (la pendiente no cuenta) → ' + A.ganancia);
-    ok(A.pct === 0.05 && A.comisionAgente === 292.5, 'agente: 5 % FIJO de la ganancia (aunque tenga 7 activos): 292,5 CR');
-    ok(A.depositado === 3000 && A.retirado === 500 && A.inyeccionNeta === 2500 && A.comisionInyeccion === 75,
-      'inyección neta de A: 3.000 depositado − 500 retirado = 2.500 → 3 % = 75 CR (no cuentan lo rechazado, lo pendiente ni el jugador inactivo)');
-    ok(A.totalAgente === 367.5, 'el agente A cobra en total 292,5 (ganancia) + 75 (3 % fijo de inyección) = 367,5 CR');
-    ok(A.comisionSupervisor === 585 && A.casa === 4897.5, 'supervisora 10 % de la ganancia: 585 CR · casa: 5.850 − 292,5 − 585 − 75 = 4.897,5 CR');
+    ok(A.pct === 0.12 && A.comisionAgente === 702, 'agente: 12 % FIJO de la ganancia (aunque tenga 7 activos): 702 CR');
+    ok(A.depositado === 3000 && A.retirado === 500 && A.inyeccionNeta === 2500 && A.comisionInyeccion === 0,
+      'inyección neta de A: 2.500 (solo informativa): ya NO se paga comisión por lo depositado');
+    ok(A.totalAgente === 702, 'el agente A cobra en total solo su 12 %: 702 CR (sin más comisiones)');
+    ok(A.comisionSupervisor === 1053 && A.casa === 4095, 'supervisora 18 % de la ganancia: 1.053 CR · casa: 5.850 − 702 − 1.053 = 4.095 CR (70 %)');
     ok(B.ganancia === -1000 && B.comisionAgente === 0 && B.arrastreSiguiente === -1000, 'red de B en pérdidas (−1.000): sin comisión y la pérdida pasa a la semana siguiente');
-    ok(B.inyeccionNeta === 4000 && B.comisionInyeccion === 0, 'B inyectó 4.000 pero la casa perdió con su red: no cobra el 3 % (solo si la casa gana)');
+    ok(B.inyeccionNeta === 4000 && B.comisionInyeccion === 0 && B.comisionAgente === 0, 'B inyectó 4.000 pero la casa perdió con su red: no cobra nada');
     const S = j.agentes.find(a => a.uid === 'BG_S');
-    ok(S && S.rol === 'director' && S.ganancia === 1000 && S.comisionAgente === 50 && S.comisionSupervisor === 0,
-      'la supervisora sigue cobrando como agente por su jugador propio: 5 % de 1.000 = 50 CR');
+    ok(S && S.rol === 'director' && S.ganancia === 1000 && S.comisionAgente === 120 && S.comisionSupervisor === 0,
+      'la supervisora sigue cobrando como agente por su jugador propio: 12 % de 1.000 = 120 CR');
     ok(!j.agentes.some(a => a.uid === 'BG_ceo'), 'quien no tiene jugadores propios no aparece como agente');
-    ok(j.totales.casa === 4897.5 - 1000 + 950 && j.totales.comisionInyeccion === 75, 'totales para el CEO: casa ' + j.totales.casa + ' · inyección pagada ' + j.totales.comisionInyeccion);
+    ok(j.totales.casa === 4095 - 1000 + 880 && j.totales.comisionInyeccion === 0, 'totales para el CEO: casa ' + j.totales.casa + ' · inyección pagada ' + j.totales.comisionInyeccion);
 
     // ---- Quién ve qué ----
     [s, j] = await llamar('GET', `/api/comisiones?semana=${pasada.id}`, null, t.BG_A);
     ok(s === 200 && j.agentes.length === 1 && j.agentes[0].uid === 'BG_A' && !j.totales, 'el agente solo ve lo suyo');
     [s, j] = await llamar('GET', `/api/comisiones?semana=${pasada.id}`, null, t.BG_S);
-    ok(s === 200 && j.agentes.map(a => a.uid).sort().join() === 'BG_A,BG_S' && j.supervisores[0].comision === 585,
-      'la supervisora ve a sus agentes, su fila propia como agente y su 10 % de equipo (585)');
+    ok(s === 200 && j.agentes.map(a => a.uid).sort().join() === 'BG_A,BG_S' && j.supervisores[0].comision === 1053,
+      'la supervisora ve a sus agentes, su fila propia como agente y su 18 % de equipo (1.053)');
     [s] = await llamar('GET', '/api/comisiones', null, t.BG_a1);
     ok(s === 403, 'un jugador no ve comisiones');
 
@@ -114,8 +114,8 @@ const entrar = async (uid) => (await llamar('POST', '/api/auth/login', { identif
     // ---- Semana actual: B gana 1.500 pero arrastra −1.000 → comisión solo sobre 500 ----
     [s, j] = await llamar('GET', '/api/comisiones', null, t.BG_ceo);
     const B2 = j.agentes.find(a => a.uid === 'BG_B');
-    ok(B2.ganancia === 1500 && B2.arrastreAnterior === -1000 && B2.neto === 500 && B2.comisionAgente === 25,
-      'esta semana B gana 1.500, descuenta el arrastre de −1.000 y cobra el 5 % de 500 = 25 CR');
+    ok(B2.ganancia === 1500 && B2.arrastreAnterior === -1000 && B2.neto === 500 && B2.comisionAgente === 60,
+      'esta semana B gana 1.500, descuenta el arrastre de −1.000 y cobra el 12 % de 500 = 60 CR');
 
     // ---- Asignar supervisor ----
     [s] = await llamar('POST', '/api/admin/asignar-supervisor', { agenteUid: 'BG_B', supervisorUid: 'BG_A' }, t.BG_ceo);
