@@ -588,6 +588,8 @@ function cargarDeportesOdds() {
       if (Array.isArray(r.data)) {
         deportesOdds.lista = r.data.filter(d => d && d.group === 'Soccer' && !d.has_outrights);
         deportesOdds.claves = new Set(r.data.filter(d => d && !d.has_outrights).map(d => d.key));
+        const selecciones = deportesOdds.lista.filter(d => /international|friendl|concacaf|nations|qualif|euro|copa america|africa cup|asian cup/i.test(`${d.key} ${d.title} ${d.description || ''}`)).map(d => d.key);
+        console.log(`Torneos de selecciones en The Odds API hoy: ${selecciones.join(', ') || 'ninguno'}`);
         deportesOdds.cargadaEn = Date.now();
       }
     })
