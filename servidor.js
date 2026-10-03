@@ -908,7 +908,7 @@ app.get('/api/ping', (req, res) => {
 
 // Versión del servidor: el script de publicación espera a que Render tenga esta antes de subir la web.
 app.get('/api/version', (req, res) => {
-  res.json({ version: 'etapa16' });
+  res.json({ version: 'etapa17' });
 });
 
 app.get('/api/health', (req, res) => {
