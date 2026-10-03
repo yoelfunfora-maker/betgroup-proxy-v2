@@ -249,6 +249,13 @@ Revisión previa: el "Entrar con Google" antiguo nunca funcionó en la versión 
 - Pruebas: `test/google.prueba.js` (30), `test/google.e2e.js` (17, incluye Google/Cloudflare bloqueados y la vinculación obligatoria al volver la conexión).
 - Claves creadas por Yoel y puestas en Render (GOOGLE_CLIENT_ID del proyecto betgroup-cuba-2024; Turnstile con los hostnames web.app y firebaseapp.com). Servidor desplegado y web publicada. 3 oct 2026: **Google FUNCIONA** en el móvil de Yoel tras añadir `https://betgroup-cuba-2024.web.app` a los «Orígenes autorizados de JavaScript» del cliente OAuth (Firebase solo traía firebaseapp.com; el error era origin_mismatch). Pendiente: prueba completa (registro con Google + vinculación obligatoria del CEO). En la rama hay un respaldo sin desplegar: ID de cliente público por defecto en lib/config.js. Las funciones antiguas `doGoogleSignIn`/`showGoogleRegForm`/`completarGoogleReg` siguen en index.html sin uso (no se borran sin autorización).
 
+## Etapa 14 (3 oct 2026) — decisiones de Yoel tras probar Google
+- **Casilla de Cloudflare OBLIGATORIA** en el registro con formulario (por defecto; `config/turnstileObligatorio = false` la vuelve opcional). Si no carga, la web lo explica y ofrece "Registrarse con Google" (Google ya verifica que es una persona), y frena el envío en el móvil para no gastar intentos del límite por IP (ETECSA compartida). `/api/auth/opciones` informa `turnstileObligatorio`.
+- **Borrado** el acceso antiguo con Google (`doGoogleSignIn`, `showGoogleRegForm`, `completarGoogleReg`) y el perfil de respaldo `googleRegData_` en localStorage (el perfil sale solo del servidor).
+- **Desplegado** el respaldo del ID de cliente de Google (público) por defecto en `lib/config.js`.
+- Botón "Registrarse con Google" arriba del formulario de registro (lo ya escrito pasa a la ventanita).
+- Versión del servidor: `etapa14`.
+
 ## Cierre de la sesión del 2 oct 2026 — pendiente para la próxima
 
 1. **Publicar la web de las Etapas 10, 11 y 12** (el servidor estará en `etapa12`): `git -C ~/bg-frontend-privado fetch -q origin claude/upbeat-cerf-rpytdm && git -C ~/bg-frontend-privado checkout -q -B etapa3 origin/claude/upbeat-cerf-rpytdm && bash ~/bg-frontend-privado/publicar/publicar_web.sh` (copia también sw.js, manifest.json e iconos/).
