@@ -291,3 +291,20 @@ Revisión previa: el "Entrar con Google" antiguo nunca funcionó en la versión 
 
 - Repo hermano `betgroup-proxy` (sin "-v2") tiene credenciales reales embebidas en archivos versionados — Yoel ya lo sabe, piensa eliminarlo, no requiere acción inmediata
 - Antes de cerrar cualquier ronda: `node -c` sin errores, respaldo hecho, autorización explícita recibida, **y este archivo actualizado y subido**
+
+## Etapa 17 — avisos y login estable (3 oct 2026)
+
+**Por qué "cada cosa nueva rompía el login" (causas de fondo, ya corregidas):**
+1. La web preguntaba UNA sola vez `/api/auth/opciones`; si el servidor se estaba reiniciando (cada subida a `main`) o despertando, el botón de Google y la casilla de Cloudflare no aparecían nunca. Ahora se recuerdan en el teléfono y se reintenta (3 s → ~3 min) y al volver la conexión.
+2. El panel de agente añadía en cada visita otra escucha que descargaba la tabla entera de `users` cada 20 s (más sus lecturas extra). Todo va por una sola conexión del servidor con Firebase: el login esperaba en la cola. Ahora hay una sola escucha y no se consulta con la app en segundo plano.
+3. Sin índices en RTDB, cada `orderByChild` descargaba el nodo completo al servidor. Ahora `database.rules.json` tiene `.indexOn` (las reglas siguen cerradas) y `publicar_web.sh` los publica.
+4. (Mío, corregido) la lista de torneos de The Odds API se esperaba en cada carga de partidos; además varias cargas se lanzaban a la vez. Ahora va en segundo plano y hay una sola carga a la vez.
+
+**Reglas nuevas:**
+- Cada subida a `main` reinicia el servidor (~30 s). No subir a `main` cambios que solo son pruebas o documentación: van a la rama y viajan con el siguiente cambio real.
+- Antes de subir: `npm test` + prueba de carga (40 peticiones a la vez) + las pruebas en navegador, incluida `test/resiliencia.e2e.js` (Google con el servidor reiniciándose o caído, una sola escucha).
+- Toda escucha en vivo nueva (`.on`) debe quitarse (`.off`) antes de volver a ponerse.
+
+**Avisos:** bandeja personal (`notificaciones/{uid}`), generales (`avisosGenerales`), push estándar RFC 8291/8292 (`lib/webpush.js`, clave VAPID cifrada AES-256-GCM en `secretos/vapid`). Falta la campana en la web.
+
+**Cuotas:** NBA en pretemporada (`basketball_nba_preseason`); registro automático de partidos sin cuota con el motivo y del margen real (fútbol ~7,4 %, NBA ~4,8 %).
