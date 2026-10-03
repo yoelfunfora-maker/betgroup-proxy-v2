@@ -959,7 +959,7 @@ function diagnosticoCuota(e, nCandidatos = 3) {
   const sportKey = claveOdds(e);
   const juegos = (sportKey && oddsCache[sportKey]?.data) || [];
   const candidatos = juegos
-    .map(g => ({ partidoOddsApi: `${g.home_team} vs ${g.away_team}`, inicio: g.commence_time, casas: g.casas ?? (g.bookmakers || []).length, parecido: Number(coincideEquipo(e, g).score.toFixed(2)) }))
+    .map(g => ({ partidoOddsApi: `${g.home_team} vs ${g.away_team}`, inicio: g.commence_time, casas: g.casas ?? (g.bookmakers || []).length, mercados: ((g.bookmakers || [])[0]?.markets || []).map(m => m.key), parecido: Number(coincideEquipo(e, g).score.toFixed(2)) }))
     .sort((a, b) => b.parecido - a.parecido).slice(0, nCandidatos);
   const faltaMs = Date.parse(e.horaInicio || '') - Date.now();
   let motivo;
@@ -967,6 +967,8 @@ function diagnosticoCuota(e, nCandidatos = 3) {
   else if (!sportKey) motivo = 'Esta competición no está conectada a The Odds API';
   else if (faltaMs > HORIZONTE_CUOTAS_MS && !juegos.length) motivo = 'Faltan más de 8 días: las cuotas se piden una semana antes';
   else if (!juegos.length) motivo = 'The Odds API no devolvió partidos de esta competición (o no quedan créditos)';
+  else if (candidatos[0] && candidatos[0].parecido >= 0.82 && !candidatos[0].mercados.includes('h2h')) motivo = `El partido está en The Odds API pero aún sin cuota 1X2 (${candidatos[0].casas} casas; mercados: ${candidatos[0].mercados.join(', ') || 'ninguno'})`;
+  else if (candidatos[0] && candidatos[0].parecido >= 0.82) motivo = 'El partido coincide y tiene 1X2, pero los nombres de las cuotas no cuadran con los equipos';
   else motivo = 'Ningún partido de The Odds API coincide (revisar nombres en mejoresCandidatos)';
   return {
     partido: `${e.local} vs ${e.visitante}`, liga: e.liga, ruta: e.ruta, inicio: e.horaInicio, motivo,
