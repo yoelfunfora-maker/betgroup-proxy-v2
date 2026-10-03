@@ -114,6 +114,34 @@ http.createServer((req, res) => {
     await pagina.waitForFunction(() => /Pedro Uno|Sin solicitudes/.test(document.getElementById('subSolicitudesPendientes').textContent), null, { timeout: 15000 });
     const solAlf = await pagina.textContent('#subSolicitudesPendientes');
     ok(/Pedro Uno/.test(solAlf) && !/Quique Ajeno|Cliente Del Ceo/.test(solAlf), 'Alfredo: solo los depósitos de sus jugadores');
+
+    // ---- Alfredo genera un código y lo comparte por enlace ----
+    await pagina.fill('#subCodeQty', '1');
+    await pagina.click('button:has-text("Generar") >> visible=true');
+    await pagina.waitForSelector('#subCodesGenerated .bg-compartir', { timeout: 15000 });
+    const botones = await pagina.$$eval('#subCodesGenerated .bg-compartir button', (b) => b.map(x => x.textContent).join(' | '));
+    ok(botones === 'Compartir | WhatsApp | Copiar enlace', 'al generar un código salen los botones: ' + botones);
+    await pagina.locator('#subCodesGenerated').screenshot({ path: path.join(__dirname, 'captura-compartir-codigo.png') });
+    const codigoNuevo = await pagina.getAttribute('#subCodesGenerated .bg-compartir', 'data-codigo');
+    const enlace = await pagina.evaluate((c) => enlaceInvitacion(c), codigoNuevo);
+    ok(enlace.endsWith('/?invitacion=' + encodeURIComponent(codigoNuevo)), 'el enlace lleva el código: ' + enlace);
+    await pagina.waitForSelector('#subActiveCodesList .bg-compartir', { timeout: 15000 });
+    ok(true, 'también en la lista de códigos disponibles se puede compartir');
+
+    // ---- Una persona nueva abre el enlace ----
+    await pagina.evaluate(() => { try { localStorage.removeItem('bg_sesion'); sessionStorage.clear(); } catch (e) {} });
+    await pagina.goto(enlace);
+    await pagina.waitForSelector('#regScreen', { state: 'visible', timeout: 15000 });
+    ok(await pagina.inputValue('#rCodigo') === codigoNuevo && /ya está puesto/.test(await pagina.textContent('#bgAvisoInvitacion')),
+      'al abrir el enlace entra directo a "Crear cuenta" con el código ya puesto');
+    ok(!/invitacion=/.test(pagina.url()), 'y el código se quita de la barra de direcciones (no queda a la vista)');
+    await pagina.screenshot({ path: path.join(__dirname, 'captura-enlace-invitacion.png') });
+    await pagina.fill('#rNombre', 'Rosa Nueva'); await pagina.fill('#rApodo', 'Gacela_8'); await pagina.fill('#rTel', '5352200099');
+    await pagina.fill('#rEmail', 'rosa@nauta.cu'); await pagina.fill('#rPass', 'clave-segura-1'); await pagina.fill('#rPass2', 'clave-segura-1');
+    await pagina.click('#btnRegistro');
+    await pagina.waitForSelector('#app', { state: 'visible', timeout: 30000 });
+    const rosa = Object.values(get('users') || {}).find(u => u.email === 'rosa@nauta.cu') || {};
+    ok(rosa.referidoPorUid === 'BG_alf', 'se registra sin escribir el código y queda ligada a Alfredo (el que compartió el enlace)');
   } catch (e) {
     ok(false, 'excepción: ' + e.message.split('\n')[0]);
     await pagina.screenshot({ path: path.join(__dirname, 'fallo-redes.png') });
