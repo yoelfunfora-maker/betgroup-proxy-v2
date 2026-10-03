@@ -100,11 +100,18 @@ async function registrar(pagina, i, codigo) {
     await pagina.waitForSelector('#bgGoogleZona:not([hidden]) #botonGoogleFalso', { timeout: 15000 });
     ok(await pagina.evaluate(() => window.__gsiCliente) === CLIENT_ID, 'aparece "Continuar con Google" con el ID de cliente que da el servidor');
     await pagina.screenshot({ path: path.join(__dirname, 'captura-login-google.png') });
-    await pagina.click('#botonGoogleFalso');
+    // Registro: "Registrarse con Google" arriba del formulario; lo ya escrito pasa a la ventanita.
+    await pagina.click('text=Crear cuenta');
+    await pagina.waitForSelector('#bgGoogleRegZona:not([hidden]) #botonGoogleFalso', { timeout: 15000 });
+    ok(/o con tu correo/.test(await pagina.textContent('#bgGoogleRegZona')), 'en "Crear cuenta" sale primero "Registrarse con Google" y debajo "o con tu correo"');
+    await pagina.screenshot({ path: path.join(__dirname, 'captura-registro-con-google.png') });
+    await pagina.fill('#rApodo', 'Tiburona_7'); await pagina.fill('#rCodigo', 'gg-1');
+    await pagina.click('#bgGoogleRegBtn #botonGoogleFalso');
     await pagina.waitForSelector('#bgModalGoogle', { timeout: 15000 });
+    ok(await pagina.inputValue('#gApodo') === 'Tiburona_7' && await pagina.inputValue('#gCodigo') === 'gg-1', 'el apodo y el código que ya había escrito aparecen solos (no los repite)');
     ok(/María <b>Pérez<\/b>/.test(await pagina.textContent('#bgModalGoogle')) && !(await pagina.$('#bgModalGoogle b')), 'persona nueva: pide apodo, teléfono y código; el nombre de Google se muestra como texto (sin inyectar HTML)');
     await pagina.locator('#bgModalGoogle .card').screenshot({ path: path.join(__dirname, 'captura-registro-google.png') });
-    await pagina.fill('#gApodo', 'Tiburona_7'); await pagina.fill('#gTel', '53 5777 1234'); await pagina.fill('#gCodigo', 'gg-1');
+    await pagina.fill('#gTel', '53 5777 1234');
     await pagina.click('#bgModalGoogle >> text=Crear cuenta');
     await pagina.waitForSelector('#app', { state: 'visible', timeout: 30000 });
     const u = Object.values(get('users') || {}).find(x => x.email === 'maria.cuba@gmail.com') || {};
