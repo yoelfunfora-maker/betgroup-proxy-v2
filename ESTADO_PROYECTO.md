@@ -256,6 +256,15 @@ Revisión previa: el "Entrar con Google" antiguo nunca funcionó en la versión 
 - Botón "Registrarse con Google" arriba del formulario de registro (lo ya escrito pasa a la ventanita).
 - Versión del servidor: `etapa14`.
 
+## Etapa 15 (3 oct 2026) — redes, accesos, invitaciones, avisos e iconos
+- **Panel de agente del CEO mostraba referidos de otros agentes**: `equalTo(undefined)` se perdía al enviarse y el servidor devolvía toda la tabla (el CEO puede leerla entera). `bg-api.js` cambia un valor vacío por `~sin-valor~` (no encuentra a nadie).
+- **Red del supervisor** (servidor, `lib/politicas.js` → `esDeMiRedUid`): sus jugadores + agentes asignados (`supervisorUid`) + jugadores de esos agentes. Lectura de users/apuestas/depósitos/solicitudes/retiros acotada a la red (antes veía depósitos y retiros de TODA la casa); aprobar/rechazar depósitos solo de su red (`revisarRed` en operaciones). `GET /api/red` arma la red; tarjeta **Mi red** en el panel del supervisor (buscador). El CEO lo ve todo.
+- **Auditoría de accesos**: `test/accesos.prueba.js` (21 funciones × 5 rangos, tablas privadas, escalada de privilegios).
+- **Compartir invitación**: junto a cada código (agente, supervisor y CEO) botones Compartir / WhatsApp / Copiar enlace. `/?invitacion=CODIGO` abre "Crear cuenta" con el código puesto (también pasa a "Registrarse con Google") y lo quita de la barra de direcciones.
+- **Avisos**: el permiso se pide al tocar Iniciar sesión / Crear cuenta o en el primer toque dentro de la app (los móviles exigen un toque de la persona).
+- **Sin emojis**: Font Awesome 6.4 servido desde `fuentes/fa` (sin CDN); textos fijos convertidos; un traductor (MutationObserver) cambia por icono cualquier emoji que pinte el código; en alert/confirm/prompt, opciones de listas y notificaciones del móvil se quitan. Telegram conserva sus emojis (mensajes internos del CEO).
+- Pruebas: `test/redes.e2e.js` (cada panel ve solo su gente, enlace de invitación, 15 pantallas sin emojis). Versión del servidor: `etapa15`.
+
 ## Cierre de la sesión del 2 oct 2026 — pendiente para la próxima
 
 1. **Publicar la web de las Etapas 10, 11 y 12** (el servidor estará en `etapa12`): `git -C ~/bg-frontend-privado fetch -q origin claude/upbeat-cerf-rpytdm && git -C ~/bg-frontend-privado checkout -q -B etapa3 origin/claude/upbeat-cerf-rpytdm && bash ~/bg-frontend-privado/publicar/publicar_web.sh` (copia también sw.js, manifest.json e iconos/).
