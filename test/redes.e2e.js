@@ -31,6 +31,10 @@ usuario('BG_p2', 'p2@x.com', { nombre: 'Pablo Dos', apodo: 'PabloDos', rol: 'mem
 // Otro agente que NO es de la supervisora, con su jugador.
 usuario('BG_otro', 'otro@x.com', { nombre: 'Otro Agente', apodo: 'OtroAg', rol: 'subadmin', rolLevel: 2, telefono: '5352200007', codigoInvitacion: 'BGOTRO1' });
 usuario('BG_q1', 'q1@x.com', { nombre: 'Quique Ajeno', apodo: 'QuiqueAj', rol: 'member', rolLevel: 1, telefono: '5352200008', referidoPorUid: 'BG_otro' });
+// Ese otro agente también tiene un código generado y YA USADO (antes la tabla de referidos de
+// cualquier agente/supervisor/CEO mostraba todos los códigos usados de la casa).
+set('codigosAcceso/OTRO-9', { codigo: 'OTRO-9', generadoPor: 'BG_otro', generadoPorNombre: 'Otro Agente', usado: true, rol: 'member' });
+usuario('BG_q2', 'q2@x.com', { nombre: 'Quino Codigo', apodo: 'QuinoCod', rol: 'member', rolLevel: 1, telefono: '5352200009', referidoPor: 'OTRO-9' });
 const sol = (id, uid, nombre, monto) => set(`solicitudesDeposito/${id}`, { id, userId: uid, nombre, telefono: '53', monto, moneda: 'CUP', estado: 'pendiente', creadoEn: Date.now(), fotoUrl: '' });
 sol('S1', 'BG_p1', 'Pedro Uno', 600); sol('S2', 'BG_q1', 'Quique Ajeno', 700); sol('S3', 'BG_cp', 'Cliente Del Ceo', 800);
 set('config', { minBet: 100, maxBet: 500 });
@@ -105,6 +109,10 @@ http.createServer((req, res) => {
     ok(/Cliente Del Ceo/.test(solCeo) && !/Pedro Uno|Quique Ajeno/.test(solCeo), 'CEO en su panel de agente: ve el depósito de SU jugador y no los de Alfredo ni de otros → ' + solCeo.replace(/\s+/g, ' ').slice(0, 80));
     const opciones = await pagina.$$eval('#subMember option', (o) => o.map(x => x.textContent).join(' | '));
     ok(!/Pedro|Pablo|Quique/.test(opciones), 'y en "Recargar a un jugador" no salen los jugadores de otros agentes → ' + opciones);
+    await pagina.waitForFunction(() => /Cliente Del Ceo/.test(document.getElementById('dynamicReferralsBody').textContent), null, { timeout: 15000 });
+    await pagina.waitForTimeout(3000); // la tabla antes "volvía" a pintar a los de otros unos segundos después
+    const tablaCeo = await pagina.textContent('#dynamicReferralsBody');
+    ok(/Cliente Del Ceo/.test(tablaCeo) && !/Quino Codigo|Pedro Uno|Pablo Dos|Quique Ajeno/.test(tablaCeo), 'CEO: la tabla de referidos muestra solo a SU jugador y no vuelve a aparecer la gente de otros agentes → ' + tablaCeo.replace(/\s+/g, ' ').slice(0, 90));
 
     for (const p of ['home', 'pagos', 'retiros', 'sub', 'director', 'ceo']) sinEmojis.push(['CEO ' + p, await emojisVisibles(p)]);
 
@@ -133,6 +141,10 @@ http.createServer((req, res) => {
     await pagina.waitForFunction(() => /Pedro Uno|Sin solicitudes/.test(document.getElementById('subSolicitudesPendientes').textContent), null, { timeout: 15000 });
     const solAlf = await pagina.textContent('#subSolicitudesPendientes');
     ok(/Pedro Uno/.test(solAlf) && !/Quique Ajeno|Cliente Del Ceo/.test(solAlf), 'Alfredo: solo los depósitos de sus jugadores');
+    await pagina.waitForFunction(() => /Pedro Uno/.test(document.getElementById('dynamicReferralsBody').textContent), null, { timeout: 15000 });
+    await pagina.waitForTimeout(2000);
+    const tablaAlf = await pagina.textContent('#dynamicReferralsBody');
+    ok(/Pedro Uno/.test(tablaAlf) && /Pablo Dos/.test(tablaAlf) && !/Quino Codigo|Cliente Del Ceo|Quique Ajeno/.test(tablaAlf), 'Alfredo: su tabla de referidos tiene a sus 2 jugadores y a nadie más');
 
     for (const p of ['home', 'pagos', 'retiros', 'sub']) sinEmojis.push(['agente ' + p, await emojisVisibles(p)]);
     const conEmoji = sinEmojis.filter(([, e]) => e);
