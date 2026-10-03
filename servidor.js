@@ -274,6 +274,8 @@ function parseEvents(espnData, sport, ruta = null) {
         minuto: ev.status?.displayClock || null,
         estado: isLive ? 'live' : 'scheduled',
         horaInicio: ev.date || null,
+        // Tipo de temporada en ESPN: 1 pretemporada, 2 regular, 3 eliminatorias (la NBA tiene cuotas aparte en pretemporada).
+        temporada: Number(ev.season?.type ?? espnData.season?.type) || null,
         cuota_local: null,
         cuota_empate: null,
         cuota_visitante: null
@@ -558,7 +560,7 @@ const SELECCIONES_POR_RUTA = Object.freeze({
   // La Eurocopa: se excluye "World Cup Qualifiers - Europe", que también contiene "euro".
   'soccer/uefa.euroq': [/euro/i, /qualif/i, /^(?![\s\S]*world cup)/i]
 });
-const deportesOdds = { lista: [], cargadaEn: 0, intentadaEn: 0, cargando: null };
+const deportesOdds = { lista: [], claves: null, cargadaEn: 0, intentadaEn: 0, cargando: null };
 // Nunca bloquea la carga de partidos: se pide en segundo plano, un solo intento con la clave de la
 // franja, y si falla no se vuelve a probar hasta dentro de 1 hora. (Antes se esperaba a esta
 // petición en cada carga y, al fallar, el servidor se saturaba y dejaba de responder.)
@@ -573,6 +575,7 @@ function cargarDeportesOdds() {
     .then((r) => {
       if (Array.isArray(r.data)) {
         deportesOdds.lista = r.data.filter(d => d && d.group === 'Soccer' && !d.has_outrights);
+        deportesOdds.claves = new Set(r.data.filter(d => d && !d.has_outrights).map(d => d.key));
         deportesOdds.cargadaEn = Date.now();
       }
     })
@@ -588,6 +591,11 @@ function claveSelecciones(ruta) {
 
 // Competición de The Odds API para un partido (null = no se piden cuotas).
 function claveOdds(evento) {
+  // NBA en pretemporada: The Odds API la publica en otra competición (basketball_nba_preseason).
+  // Si ya se tiene la lista oficial y no aparece, no se pide (no se gastan créditos en vano).
+  if (evento.sport === 'basketball' && evento.temporada === 1) {
+    return !deportesOdds.claves || deportesOdds.claves.has('basketball_nba_preseason') ? 'basketball_nba_preseason' : null;
+  }
   if (evento.sport === 'soccer' && evento.ruta && !ODDS_POR_RUTA[evento.ruta] && SELECCIONES_POR_RUTA[evento.ruta]) return claveSelecciones(evento.ruta);
   const v = sportKeyMap[evento.sport];
   return (typeof v === 'function' ? v(evento.liga, evento.ruta) : v) || null;
@@ -970,7 +978,7 @@ function registrarSinCuota(eventos) {
   const lineas = sin.map(e => {
     const d = diagnosticoCuota(e, 1);
     const c = d.mejoresCandidatos[0];
-    return `${d.partido} [${d.ruta || e.sport}] → ${d.competicionOddsApi || '-'} (${d.partidosEnOddsApi} en API, copia ${d.cacheCuotas || 'ninguna'}): ${d.motivo}${c ? ` · más parecido: ${c.partidoOddsApi} ${c.inicio} (${c.parecido})` : ''}`;
+    return `${d.partido} ${e.horaInicio || ''} [${d.ruta || e.sport}] → ${d.competicionOddsApi || '-'} (${d.partidosEnOddsApi} en API, copia ${d.cacheCuotas || 'ninguna'}): ${d.motivo}${c ? ` · más parecido: ${c.partidoOddsApi} ${c.inicio} (${c.parecido})` : ''}`;
   });
   // Margen de la casa en cada partido con cuota: suma de probabilidades implícitas − 100 %.
   const margenes = {};
