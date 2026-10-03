@@ -558,20 +558,26 @@ const SELECCIONES_POR_RUTA = Object.freeze({
   // La Eurocopa: se excluye "World Cup Qualifiers - Europe", que también contiene "euro".
   'soccer/uefa.euroq': [/euro/i, /qualif/i, /^(?![\s\S]*world cup)/i]
 });
-const deportesOdds = { lista: [], cargadaEn: 0 };
-async function cargarDeportesOdds() {
-  if (Date.now() - deportesOdds.cargadaEn < 12 * 3600000 && deportesOdds.lista.length) return deportesOdds.lista;
-  for (const key of config.oddsApiKeys) {
-    try {
-      const r = await axios.get(`https://api.the-odds-api.com/v4/sports?apiKey=${encodeURIComponent(key)}`, { timeout: 8000 });
+const deportesOdds = { lista: [], cargadaEn: 0, intentadaEn: 0, cargando: null };
+// Nunca bloquea la carga de partidos: se pide en segundo plano, un solo intento con la clave de la
+// franja, y si falla no se vuelve a probar hasta dentro de 1 hora. (Antes se esperaba a esta
+// petición en cada carga y, al fallar, el servidor se saturaba y dejaba de responder.)
+function cargarDeportesOdds() {
+  const ahora = Date.now();
+  if (deportesOdds.lista.length && ahora - deportesOdds.cargadaEn < 12 * 3600000) return;
+  if (deportesOdds.cargando || ahora - deportesOdds.intentadaEn < 3600000) return;
+  const key = getApiKey();
+  if (!key) return;
+  deportesOdds.intentadaEn = ahora;
+  deportesOdds.cargando = axios.get(`https://api.the-odds-api.com/v4/sports?apiKey=${encodeURIComponent(key)}`, { timeout: 5000 })
+    .then((r) => {
       if (Array.isArray(r.data)) {
         deportesOdds.lista = r.data.filter(d => d && d.group === 'Soccer' && !d.has_outrights);
         deportesOdds.cargadaEn = Date.now();
-        return deportesOdds.lista;
       }
-    } catch (e) { /* se prueba la siguiente clave */ }
-  }
-  return deportesOdds.lista;
+    })
+    .catch((e) => console.warn('Lista de torneos de The Odds API no disponible:', e.response ? e.response.status : e.code || e.message))
+    .finally(() => { deportesOdds.cargando = null; });
 }
 function claveSelecciones(ruta) {
   const patrones = SELECCIONES_POR_RUTA[ruta];
@@ -658,8 +664,9 @@ function asignarCuotas(eventosGrupo, juegos, fuente) {
 }
 
 async function enriquecerConCuotas(eventos) {
-  // Lista de competiciones de The Odds API (gratis, sin gastar cuota): da la clave de los torneos de selecciones.
-  await cargarDeportesOdds().catch(() => {});
+  // Lista de competiciones de The Odds API (gratis, sin gastar cuota): da la clave de los torneos de
+  // selecciones. Se pide en segundo plano: esta carga no la espera.
+  cargarDeportesOdds();
   const apiKey = getApiKey();
   if (!apiKey) {
     console.warn('⚠️ Sin The Odds API Key - usando cuotas por defecto');
@@ -817,7 +824,15 @@ const DEPORTES = [
   { path: 'mma/ufc/scoreboard', sport: 'mma' }
 ];
 
-async function precalentarCache() {
+// Una sola carga de partidos a la vez: si ya hay una en marcha, se espera a esa en vez de lanzar
+// otra (antes, cada teléfono que abría la web lanzaba una carga completa y el servidor se ahogaba).
+let cargaPartidos = null;
+function precalentarCache() {
+  if (!cargaPartidos) cargaPartidos = cargarPartidos().finally(() => { cargaPartidos = null; });
+  return cargaPartidos;
+}
+
+async function cargarPartidos() {
   console.log('⏳ Precalentando caché...');
 
 
@@ -1259,6 +1274,12 @@ app.get('/api/fixtures', async (req, res) => {
     if (cached) {
       return res.json(cached);
     }
+    // Caducada pero existente: se entrega al momento y se actualiza por detrás.
+    const viejo = cache.fixtures && cache.fixtures.data;
+    if (viejo) {
+      precalentarCache().catch(e => console.error('Recalcular partidos:', e.message));
+      return res.json(viejo);
+    }
 
     const response = {
       status: 'loading',
@@ -1270,7 +1291,7 @@ app.get('/api/fixtures', async (req, res) => {
     
     res.json(response);
 
-    await precalentarCache();
+    precalentarCache().catch(e => console.error('Recalcular partidos:', e.message));
   } catch(err) {
     if (!res.headersSent) responderError(res, req, err, '/api/fixtures');
     else console.error(`[${req.id}] /api/fixtures:`, err);
