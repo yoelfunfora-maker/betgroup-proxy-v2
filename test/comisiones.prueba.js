@@ -90,6 +90,17 @@ const entrar = async (uid) => (await llamar('POST', '/api/auth/login', { identif
     [s] = await llamar('GET', '/api/comisiones', null, t.BG_a1);
     ok(s === 403, 'un jugador no ve comisiones');
 
+    // ---- "Mi red" del supervisor ----
+    [s, j] = await llamar('GET', '/api/red', null, t.BG_S);
+    ok(s === 200 && j.agentes.length === 1 && j.agentes[0].uid === 'BG_A' && j.agentes[0].jugadores.length === 8,
+      'Mi red: la supervisora ve a su agente A con sus 8 jugadores');
+    ok(j.propios.map(x => x.uid).join() === 'BG_s1' && j.totales.jugadores === 9, 'y aparte su jugador propio (total 9)');
+    ok(!/"hash"|"salt"|sesionVersion|"email"/.test(JSON.stringify(j)), 'sin contraseñas ni datos secretos en la respuesta');
+    [s] = await llamar('GET', '/api/red', null, t.BG_A);
+    ok(s === 403, 'un agente no puede pedir la red de un supervisor');
+    [s, j] = await llamar('GET', '/api/red?de=BG_S', null, t.BG_ceo);
+    ok(s === 200 && j.agentes[0].uid === 'BG_A', 'el CEO puede ver la red de cualquier supervisor');
+
     // ---- Cierre de semana ----
     [s] = await llamar('POST', '/api/admin/comisiones/cerrar', { semana: actual.id }, t.BG_ceo);
     ok(s === 409, 'la semana en curso no se puede cerrar');

@@ -18,7 +18,7 @@ const { crearRanking, semanaDe, semanaPorId, semanaAnterior } = require('./lib/r
 const imagenes = require('./lib/imagenes');
 const { crearApiFootball } = require('./lib/apiFootball');
 const { crearAntifraude } = require('./lib/antifraude');
-const { crearComisiones } = require('./lib/comisiones');
+const { crearComisiones, miembrosDe } = require('./lib/comisiones');
 const { fusionarCuotasBot } = require('./lib/mercadosBot');
 const { leerMarcador } = require('./lib/mercados');
 const { crearProxyDb } = require('./lib/proxyDb');
@@ -977,6 +977,37 @@ app.get('/api/comisiones', requerirSesion, requerirNivel(NIVEL.SUBADMIN), operac
   const guardada = (await db.ref(`comisionesSemana/${sem.id}`).once('value')).val();
   const tabla = guardada && guardada.cerrada ? guardada : await comisiones.calcular(sem);
   return { ...comisiones.filtrarPara(req.usuario, tabla), cerrada: Boolean(guardada && guardada.cerrada) };
+}));
+// "Mi red" del supervisor: sus agentes (asignados por el CEO) con sus jugadores, y sus jugadores
+// propios. Solo datos de gestión (nunca credenciales). El CEO puede ver la de un supervisor con ?de=<uid>.
+function fichaJugador(uid, u) {
+  return {
+    uid, apodo: u.apodo || null, nombre: u.nombre || null, telefono: u.telefono || null,
+    creditoReal: Number(u.creditoReal) || 0, creditoPromo: Number(u.creditoPromo) || 0,
+    activo: u.activo !== false, alta: u.fecha_registro || null
+  };
+}
+app.get('/api/red', requerirSesion, requerirNivel(DIRECTOR), operacion(async (req) => {
+  let supUid = req.usuario.uid;
+  if (req.query?.de && req.usuario.nivel >= NIVEL.CEO) {
+    if (!/^[A-Za-z0-9_-]{3,64}$/.test(String(req.query.de))) throw new ErrorOperacion(400, 'Supervisor inválido');
+    supUid = String(req.query.de);
+  }
+  const [uS, cS] = await Promise.all([db.ref('users').once('value'), db.ref('codigosAcceso').once('value')]);
+  const usuarios = uS.val() || {}, codigos = cS.val() || {};
+  const sup = usuarios[supUid];
+  if (!sup) throw new ErrorOperacion(404, 'Supervisor no encontrado');
+  const lista = (ids) => ids.map(id => fichaJugador(id, usuarios[id] || {})).sort((a, b) => (b.alta || 0) - (a.alta || 0));
+  const agentes = Object.entries(usuarios)
+    .filter(([, u]) => u && u.rol === 'subadmin' && u.supervisorUid === supUid)
+    .map(([uid, u]) => ({ ...fichaJugador(uid, u), codigoInvitacion: u.codigoInvitacion || null, jugadores: lista(miembrosDe(uid, u, usuarios, codigos)) }))
+    .sort((a, b) => b.jugadores.length - a.jugadores.length);
+  const propios = lista(miembrosDe(supUid, sup, usuarios, codigos).filter(id => !(usuarios[id] && usuarios[id].rol === 'subadmin' && usuarios[id].supervisorUid === supUid)));
+  return {
+    supervisor: { uid: supUid, apodo: sup.apodo || null, nombre: sup.nombre || null },
+    agentes, propios,
+    totales: { agentes: agentes.length, jugadores: agentes.reduce((t, a) => t + a.jugadores.length, 0) + propios.length }
+  };
 }));
 app.post('/api/admin/comisiones/cerrar', soloCEO, operacion(async (req) => {
   const sem = semanaPedida(req.body?.semana);
