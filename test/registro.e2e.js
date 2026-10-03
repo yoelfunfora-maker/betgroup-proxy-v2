@@ -16,6 +16,8 @@ const API_REAL = 'https://betgroup-proxy-v2-8vqj.onrender.com';
 
 set('codigosAcceso/INVITA-2026', { code: 'INVITA-2026', createdBy: 'BG_ceo', usado: false, rol: 'member' });
 set('config', { minBet: 100, maxBet: 500 });
+// La pelea de MMA de ejemplo no tiene cuota: se muestran también los partidos sin cuota (aquí se prueban las fotos).
+set('config/mostrarPartidosSinCuota', true);
 
 // Velada de UFC: un luchador con foto que carga y otro cuya foto falla.
 const futuro = new Date(Date.now() + 86400000).toISOString();
