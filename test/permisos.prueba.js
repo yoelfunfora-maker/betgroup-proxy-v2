@@ -108,7 +108,18 @@ setTimeout(async () => {
     [s] = await llamar('POST', '/api/depositos/DEP-A/aprobar', {}, tSub);
     ok(s === 403, 'subadmin NO aprueba recargas → ' + s);
 
-    // ---- Director ----
+    // ---- Director (supervisor): solo su red ----
+    let [sR, jR] = await db(tDir, 'leer', 'solicitudesDeposito');
+    ok(sR === 200 && !Object.keys(jR.valor || {}).length, 'un supervisor SIN ese agente asignado no ve sus depósitos (antes veía los de toda la casa)');
+    [s] = await llamar('POST', '/api/depositos/DEP-A/aprobar', {}, tDir);
+    ok(s === 403 && get('depositos/DEP-A/estado') === 'pending', 'ni puede aprobar recargas de una red que no es suya → ' + s);
+    [s] = await llamar('POST', '/api/solicitudes-deposito/DEP1/rechazar', {}, tDir);
+    ok(s === 403 && get('solicitudesDeposito/DEP1/estado') === 'pendiente', 'ni rechazarlas → ' + s);
+    set('users/BG_sub/supervisorUid', 'BG_dir'); // el CEO le asigna el agente BG_sub
+    [sR, jR] = await db(tDir, 'leer', 'users');
+    ok(sR === 200 && Object.keys(jR.valor || {}).sort().join() === 'BG_dir,BG_m1,BG_m2,BG_m3,BG_sub', 'con el agente asignado ve a su agente y a los jugadores del agente: ' + Object.keys(jR.valor || {}).sort().join());
+    [sR, jR] = await db(tDir, 'leer', 'solicitudesDeposito');
+    ok(sR === 200 && Object.keys(jR.valor || {}).includes('DEP1'), 'y los depósitos de esos jugadores');
     const antes = get('users/BG_m1/creditoReal');
     const dobles = await Promise.all([1, 2].map(() => llamar('POST', '/api/depositos/DEP-A/aprobar', {}, tDir)));
     ok(dobles.filter(([x]) => x === 200).length === 1 && get('users/BG_m1/creditoReal') === antes + 600, 'director aprueba la recarga UNA sola vez (doble clic): ' + antes + ' → ' + get('users/BG_m1/creditoReal'));
